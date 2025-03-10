@@ -110,10 +110,10 @@ class JBGtranscriber():
 
         return completion.choices[0].message
 
-    def generate_summary(self, transcription_text):
+    def generate_summary(self):
         """Skapar en sammanfattning av transkriberingen."""
         prompt = f"""Sammanfatta följande transkribering på ett koncist sätt med fokus på huvudpunkterna:
-        {transcription_text}"""
+        {self.transcription}"""
         
         try:
             self.summary = self.call_openai(prompt, max_tokens=300)
@@ -121,11 +121,11 @@ class JBGtranscriber():
             print(f"An error occurred while generating the summary: {e}")
             self.summary = "Sammanfattning var inte tillgängligt"
 
-    def find_suspicious_phrases(self, transcription_text):
+    def find_suspicious_phrases(self):
         """Identifierar och markerar osannolika eller grammatiskt tveksamma ordkombinationer."""
         prompt = f"""I följande transkribering, identifiera och markera tveksamma eller osannolika ordkombinationer 
         som kan bero på fel i transkriberingen. Markera dessa genom att omsluta dem med markörerna [FEL?] och [/FEL?]:
-        {transcription_text}"""
+        {self.transcription}"""
         
         try:
             self.marked_text = self.call_openai(prompt, max_tokens=500)
@@ -133,10 +133,10 @@ class JBGtranscriber():
             print(f"An error occurred while finding suspicious phrases: {e}")
             self.marked_text = "Markering av misstänkta fel i texten misslyckades"
 
-    def suggest_follow_up_questions(self, transcription_text):
+    def suggest_follow_up_questions(self):
         """Föreslår fem relevanta uppföljningsfrågor baserat på transkriberingen."""
         prompt = f"""Baserat på följande transkribering, generera fem möjliga uppföljningsfrågor som en intervjuare skulle kunna ställa:
-        {transcription_text}"""
+        {self.transcription}"""
         
         try:
             self.follow_up_questions = self.call_openai(prompt, max_tokens=200)
@@ -179,12 +179,12 @@ class JBGtranscriber():
         """Post process result of call to transcription model"""
         
         transcription = JBGtranscriber.insert_newlines(result["text"], 80)
-        transcript_w_timestamps = ""
+        transcription_w_timestamps = ""
         for chunk in result["chunks"]:
-            transcript_w_timestamps += str(chunk["timestamp"]) + ": " + \
+            transcription_w_timestamps += str(chunk["timestamp"]) + ": " + \
                 JBGtranscriber.insert_newlines(str(chunk["text"]), 80) + "\n"
             
-        return transcription, transcript_w_timestamps
+        return transcription, transcription_w_timestamps
 
     def write_to_output_file(self):
         """Write final result to the output file"""
@@ -192,7 +192,7 @@ class JBGtranscriber():
         try:
             with open(self.export_path, "w") as export_file:
                 export_file.write("### Rå transkribering:\n" + self.transcription + "\n\n")
-                export_file.write("### Transkribering med tidsstämplar:\n" + self.transcript_w_timestamps + "\n\n")
+                export_file.write("### Transkribering med tidsstämplar:\n" + self.transcription_w_timestamps + "\n\n")
                 if self.summary:
                     export_file.write("### Sammanfattning:\n" + self.summary + "\n\n")
                 if self.marked_text:
