@@ -53,7 +53,11 @@ def generate_summary(transcription_text):
     prompt = f"""Sammanfatta följande transkribering på ett koncist sätt med fokus på huvudpunkterna:
     {transcription_text}"""
     
-    return call_openai(prompt, max_tokens=300)
+    try:
+        return call_openai(prompt, max_tokens=300)
+    except Exception as e:
+        print(f"An error occurred while generating the summary: {e}")
+        return "Summary generation was not available"
 
 def find_suspicious_phrases(transcription_text):
     """Identifierar och markerar osannolika eller grammatiskt tveksamma ordkombinationer."""
@@ -61,14 +65,22 @@ def find_suspicious_phrases(transcription_text):
     som kan bero på fel i transkriberingen. Markera dessa genom att omsluta dem med markörerna [FEL?] och [/FEL?]:
     {transcription_text}"""
     
-    return call_openai(prompt, max_tokens=500)
+    try:
+        return call_openai(prompt, max_tokens=500)
+    except Exception as e:
+        print(f"An error occurred while finding suspicious phrases: {e}")
+        return "Suspicious phrase detection was not available"
 
 def suggest_follow_up_questions(transcription_text):
     """Föreslår fem relevanta uppföljningsfrågor baserat på transkriberingen."""
     prompt = f"""Baserat på följande transkribering, generera fem möjliga uppföljningsfrågor som en intervjuare skulle kunna ställa:
     {transcription_text}"""
     
-    return call_openai(prompt, max_tokens=200)
+    try:
+        return call_openai(prompt, max_tokens=200)
+    except Exception as e:
+        print(f"An error occurred while generating follow-up questions: {e}")
+        return "Follow-up question generation was not available"
 
 def insert_newlines(string, n):
     """
@@ -139,7 +151,7 @@ def get_model_and_transcribe(convert_path):
     
     # What model to use
     model = AutoModelForSpeechSeq2Seq.from_pretrained(
-        MODEL_ID, torch_dtype=torch_dtype, use_safetensors=True, cache_dir="cache"
+        MODEL_ID, torch_dtype=torch_dtype, use_safetensors=True, cache_dir=".cache"
     )
     model.to(device)
     processor = AutoProcessor.from_pretrained(MODEL_ID)
