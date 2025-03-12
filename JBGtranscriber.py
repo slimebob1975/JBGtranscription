@@ -20,14 +20,15 @@ class JBGtranscriber():
     def __init__(self, 
                  convert_path,
                  export_path = Path("."),
+                 device = "cpu",
                  model_id=MODEL_ID, 
                  openai_api_keys_file=OPENAI_API_KEY_FILE
                  ):
         self.convert_path = convert_path
-        self.export_path = export_path
+        self.export_path = Path(str(export_path) + "\\" + os.path.basename(convert_path).split('/')[-1] + ".txt") 
         self.model_id = model_id
         self.openai_api_keys = JBGtranscriber.get_openai_api_keys(openai_api_keys_file)
-        self.device, self.torch_dtype = JBGtranscriber.do_nvidia_check()
+        self.device, self.torch_dtype = JBGtranscriber.do_nvidia_check(device)
         
         self.transcription = ""
         self.transcription_w_timestamps = ""
@@ -36,15 +37,22 @@ class JBGtranscriber():
         self.follow_up_questions = ""
 
     @staticmethod
-    def do_nvidia_check():
+    def do_nvidia_check(preferred_device):
         """"Check if we have GPU support or not and set data type accordingly """
         
         # Check if NVIDIA is supported
-        device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        if preferred_device == 'gpu':
+            if torch.cuda.is_available():
+                device = "cuda:0"
+                torch_dtype = torch.float16
+            else:
+                device = "cpu"
+                torch_dtype = torch.float32
+        else:
+            device = "cpu"
+            torch_dtype = torch.float32
 
-        # Set datatype and models
-        torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-        
+        # Set datatype and models        
         return device, torch_dtype
 
     @staticmethod
@@ -91,6 +99,12 @@ class JBGtranscriber():
             current_length += len(word)
 
         return result
+    
+    @staticmethod
+    def find_mp3_files(path):
+        """Generates a list of mp3 files from a path"""
+        
+        return [file for file in Path(path).rglob("*.mp3")]
 
     def call_openai(self, prompt, max_tokens=500):
         """Anropar OpenAI:s GPT-modell med en given prompt."""
@@ -204,21 +218,24 @@ class JBGtranscriber():
 def check_script_arguments():
     """Check in arguments to test script""" 
     
-    if len(sys.argv) < 2:
-        sys.exit("Usage: " + (sys.argv)[0] + " [path to mp3 file to convert] [path to preferred transcription directory]")
+    if len(sys.argv) < 4:
+        sys.exit("Usage: " + (sys.argv)[0] + " [path to mp3 file(s) to convert] [path to preferred transcription directory] [device=gpu/cpu]")
     else:
         convert_path = os.path.abspath(sys.argv[1])
-        if not os.path.exists(convert_path):
-            sys.exit("{0} is not a valid file path".format(convert_path))
-        print("Convert file path: ", convert_path)
+        if not os.path.exists(convert_path) or not os.path.isdir(convert_path):
+            sys.exit("{0} is not a valid file or directory path".format(convert_path))
+        print("Convert file(s) path: ", convert_path)
         
         export_path = os.path.abspath(sys.argv[2])
         if not os.path.isdir(export_path):
             sys.exit("{0} is not a valid directory path".format(export_path))
-        export_path = export_path + "\\" + os.path.basename(convert_path).split('/')[-1] + ".txt" 
         print("Export file path: ", export_path)    
         
-    return Path(convert_path), Path(export_path)
+        device = str(sys.argv[3])
+        if device.lower() not in ['gpu', 'cpu']:
+            sys.exit("Device must be set to 'gpu' or 'cpu', got '{0}'").format(device)
+        
+    return Path(convert_path), Path(export_path), device
 
 def main():
     """
@@ -226,29 +243,45 @@ def main():
     """
     
     # We need correct arguments passed to the script
-    convert_path, export_path = check_script_arguments()
+    convert_path, export_path, device = check_script_arguments()
     
-    # Create the transcription class
-    jbg_transcriber = JBGtranscriber(convert_path, export_path)
+    # Generate a list of files to transcribe
+    if os.path.isdir(convert_path):
+        convert_files = JBGtranscriber.find_mp3_files(convert_path)
+    elif os.path.exists(convert_path):
+        convert_files = [convert_path]
+    else:
+        sys.exit("Could not find any files to transcribe at {0}".format(convert_path))
     
     # Perform transcription
-    jbg_transcriber.transcribe()
+    for convert_file in convert_files:
         
-    # Make calls to OpenAI API to generate extra information
-    # Summary
-    jbg_transcriber.generate_summary()
+        print("Processing {0}".format(convert_file))
+        
+        # Create the transcription class
+        jbg_transcriber = JBGtranscriber(convert_file, export_path, device)
+        
+        # Make transcription
+        jbg_transcriber.transcribe()
+        
+        # Make calls to OpenAI API to generate extra information
+        # Summary
+        jbg_transcriber.generate_summary()
 
-    # Mark suspicious phrases
-    jbg_transcriber.find_suspicious_phrases()
+        # Mark suspicious phrases
+        jbg_transcriber.find_suspicious_phrases()
 
-    # Generate follow up questions
-    jbg_transcriber.suggest_follow_up_questions()
+        # Generate follow up questions
+        jbg_transcriber.suggest_follow_up_questions()
 
-    # Print result to text file
-    jbg_transcriber.write_to_output_file()
-
+        # Print result to text file
+        jbg_transcriber.write_to_output_file()
+    
+# In case of commande line execution call
+if __name__=="__main__":
+    
+    # Execute main program
+    main()
+    
     # End program successfully
     sys.exit(0)
-    
-if __name__=="__main__":
-    main()
