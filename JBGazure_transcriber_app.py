@@ -11,8 +11,9 @@ with open(".\azure_keys.json") as keys_file:
 STORAGE_ACCOUNT_CONNECTION_STRING = json.load(data).AZURE_STORAGE_CONNECTION_STRING
 blob_service_client = BlobServiceClient.from_connection_string(STORAGE_ACCOUNT_CONNECTION_STRING)
 
-@app.route("/", methods=["GET", "POST"])
+@app.route("/", methods=["GET"])
 def index():
+    """ Render the upload/download page """
     return render_template("index.html")
 
 @app.route("/upload", methods=["POST"])
@@ -22,8 +23,8 @@ def upload_file():
     if file:
         blob_client = blob_service_client.get_blob_client(container="uploaded-audio", blob=file.filename)
         blob_client.upload_blob(file, overwrite=True)
-        return "Fil uppladdad och transkriberas!", 200
-    return "Ingen fil vald", 400
+        return "File uploaded successfully and will be transcribed!", 200
+    return "No file selected", 400
 
 @app.route("/transcriptions", methods=["GET"])
 def list_transcriptions():
@@ -34,8 +35,21 @@ def list_transcriptions():
 
 @app.route("/download/<filename>", methods=["GET"])
 def download_file(filename):
-    """ Ladda ner en transkriberad fil """
+    """ Ladda ner en transkriberad fil från Azure Blob Storage """
     blob_client = blob_service_client.get_blob_client(container="transcriptions", blob=filename)
-    file_path = f"/tmp/{filename}"
     
-    with open(file_path, "wb")
+    try:
+        # Ladda ner filen till en temporär plats
+        file_path = f"/tmp/{filename}"  # Temporary location
+        with open(file_path, "wb") as file:
+            file.write(blob_client.download_blob().readall())
+
+        # Skicka filen till användaren
+        return send_file(file_path, as_attachment=True)
+
+    except Exception as e:
+        return f"Error downloading file: {str(e)}", 500
+
+# Run the Flask app
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
