@@ -222,7 +222,7 @@ def check_script_arguments():
         sys.exit("Usage: " + (sys.argv)[0] + " [path to mp3 file(s) to convert] [path to preferred transcription directory] [device=gpu/cpu]")
     else:
         convert_path = os.path.abspath(sys.argv[1])
-        if not os.path.exists(convert_path) or not os.path.isdir(convert_path):
+        if not (os.path.exists(convert_path) or os.path.isdir(convert_path)):
             sys.exit("{0} is not a valid file or directory path".format(convert_path))
         print("Convert file(s) path: ", convert_path)
         
