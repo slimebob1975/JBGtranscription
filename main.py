@@ -1,5 +1,6 @@
 from fastapi import FastAPI, File, UploadFile, BackgroundTasks
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
 import shutil
@@ -30,7 +31,7 @@ def transcribe_audio(file_path: str, result_path: str, device: str):
         return JSONResponse({"Transcription error": str(e)}, status_code=500)
 
 @app.post("/upload/")
-async def upload_audio(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
+async def upload_audio(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     file_id = str(uuid.uuid4())
     file_path = os.path.join(UPLOAD_FOLDER, file_id + "_" + file.filename)
     result_path = os.path.join(RESULTS_FOLDER, file_id + ".txt")

@@ -17,7 +17,7 @@
             if (file.type !== "audio/mpeg") {  // audio/mpeg = MP3 file type
                 alert("Only MP3 files are allowed.");
                 return;
-    }
+            }
             
             let formData = new FormData();
             formData.append("file", fileInput.files[0]);
@@ -50,9 +50,10 @@
     </script>
 </head>
 <body>
-    <h1>Audio Transcription</h1>
+    <h1>JBG transkribering</h1>
+    <h2>Notera: endast .mp3-filer!</h2>
     <input type="file" id="audioFile" accept=".mp3,audio/mpeg"> 
-    <button onclick="uploadFile()">Upload</button>
+    <button onclick="uploadFile()">Ladda upp</button>
     <p id="status"></p>
     <pre id="result"></pre>
 </body>
