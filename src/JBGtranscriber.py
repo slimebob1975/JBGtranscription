@@ -13,7 +13,7 @@ except ModuleNotFoundError as ex:
 class JBGtranscriber():
     
     # Standard Settings
-    OPENAI_API_KEY_FILE = Path(".\keys\.openai_api_keys.json")
+    OPENAI_API_KEY_FILE = Path("./keys/openai_api_keys.json")
     MODEL_ID = "KBLab/kb-whisper-large"
     CACHE_DIR = ".cache"
     
@@ -57,6 +57,7 @@ class JBGtranscriber():
 
     @staticmethod
     def get_openai_api_keys(path_to_keys_file):
+        
         """
         Reads the OpenAI API keys file and returns the keys as a dictionary with the following dictionary keys:
             OPENAI_API_KEY
