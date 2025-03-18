@@ -12,17 +12,9 @@ from fastapi import FastAPI
 
 try:
     app = FastAPI()
-
-    @app.get("/")
-    async def root():
-        print("Root route is being registered!")  # Debugging check
-        return {"message": "FastAPI is running!"}
 except Exception as e:
     print("FastAPI ERROR:", e, file=sys.stderr)
     raise
-
-# Ensure FastAPI serves static files (including index.html)
-app.mount("/static", StaticFiles(directory="static", html=True), name="static")
 
 UPLOAD_FOLDER = "uploads"
 RESULTS_FOLDER = "results"
@@ -62,10 +54,6 @@ async def upload_audio(background_tasks: BackgroundTasks, file: UploadFile = Fil
 
     return JSONResponse({"message": "File uploaded, processing started.", "file_id": file_id})
 
-@app.get("/routes/")
-async def get_routes():
-    return app.openapi()["paths"]
-
 @app.get("/download/{file_id}")
 async def get_transcription(file_id: str):
     result_path = os.path.join(RESULTS_FOLDER, file_id + ".mp3.txt")
@@ -77,3 +65,6 @@ async def get_transcription(file_id: str):
         content = f.read()
 
     return JSONResponse({"transcription": content})
+
+# Ensure FastAPI serves static files (including index.html)
+app.mount("/static", StaticFiles(directory="static", html=True), name="static")

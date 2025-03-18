@@ -22,11 +22,8 @@
             let formData = new FormData();
             formData.append("file", fileInput.files[0]);
 
-            let response = await fetch("/upload/", {
+            let response = await fetch("http://127.0.0.1:8000/upload/", {
                 method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
                 body: formData
             });
 
@@ -46,8 +43,6 @@
                     document.getElementById("status").innerText = "Transkribering avslutad!";
                     document.getElementById("result").innerText = result.transcription;
 
-                    document.getElementById("downloadLink").href = "/download/" + file_id;
-                    document.getElementById("downloadLink").style.display = "inline";
                 } else {
                     checkStatus(file_id);
                 }
