@@ -1,0 +1,33 @@
+/* Hourglass Spinner */
+.spinner {
+    border: 8px solid #f3f3f3;
+    border-top: 8px solid green;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+    margin: auto;
+}
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Center Spinner */
+#spinner-container {
+    display: none;
+    text-align: center;
+    margin-top: 20px;
+}
+
+/* Scrollable textarea for large transcriptions */
+#result {
+    width: 66%;
+    height: 33%;
+    overflow-y: scroll;
+    overflow-x: scroll;
+    font-family: monospace;
+    padding: 5px;
+    border: 1px solid #ccc;
+    display: none;  /* Hide it until there's transcription */
+}

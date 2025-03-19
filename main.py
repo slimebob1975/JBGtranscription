@@ -1,5 +1,5 @@
 from fastapi import FastAPI, File, UploadFile, BackgroundTasks
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 import os
 import sys
@@ -37,9 +37,20 @@ def transcribe_audio(file_path: str, result_path: str, device: str):
     except Exception as e:
         return JSONResponse({"Transcription error": str(e)}, status_code=500)
     else:
-        Path.unlink(Path(file_path))
+        clean_up_files(Path(file_path), Path(result_path)) 
         return JSONResponse({"message": "Transcription completed successfully. Audio file deleted."}, status_code=200)
+    
+def clean_up_files(audio_file_path: Path, transcriptions_path: Path):
+    
+    # Remove last audio file
+    Path.unlink(audio_file_path)
+    
+    # Remove all but the last transcription file (which is the transcription of the audio file)
+    old_transcripts = sorted([file for file in transcriptions_path.glob("*.mp3.txt")], key=lambda x: x.stat().st_ctime)[:-1]
+    for file in old_transcripts:
+        Path.unlink(file)
 
+# Entry point for uploading audio files
 @app.post("/upload/")
 async def upload_audio(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     
@@ -54,7 +65,8 @@ async def upload_audio(background_tasks: BackgroundTasks, file: UploadFile = Fil
 
     return JSONResponse({"message": "File uploaded, processing started.", "file_id": file_id})
 
-@app.get("/download/{file_id}")
+# Endpoint to get transcription as JSON
+@app.get("/transcription/{file_id}")
 async def get_transcription(file_id: str):
     result_path = os.path.join(RESULTS_FOLDER, file_id + ".mp3.txt")
     
@@ -65,6 +77,22 @@ async def get_transcription(file_id: str):
         content = f.read()
 
     return JSONResponse({"transcription": content})
+
+# Endpoint to download transcription as a file
+@app.get("/download/{file_id}")
+async def download_transcription(file_id: str):
+    result_path = os.path.join(RESULTS_FOLDER, file_id + ".mp3.txt")
+
+    if not os.path.exists(result_path):
+        return JSONResponse({"error": "Transcription not found"}, status_code=404)
+
+    return FileResponse(result_path, filename=f"{file_id}.txt", media_type="text/plain")
+
+# ----------------------------------------------------------------
+# Return the connection with the frontend
+@app.get("/")
+async def serve_home():
+    return FileResponse("static/index.html")
 
 # Ensure FastAPI serves static files (including index.html)
 app.mount("/static", StaticFiles(directory="static", html=True), name="static")
