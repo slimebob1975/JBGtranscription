@@ -1,3 +1,7 @@
-openai==1.65.4
-torch==2.5.1
-transformers==4.49.0
+openai
+torch
+transformers
+fastapi
+uvicorn
+gunicorn
+python-multipart

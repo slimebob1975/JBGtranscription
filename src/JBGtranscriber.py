@@ -22,12 +22,14 @@ class JBGtranscriber():
                  export_path = Path("."),
                  device = "cpu",
                  model_id=MODEL_ID, 
-                 openai_api_keys_file=OPENAI_API_KEY_FILE
+                 openai_api_keys_file=OPENAI_API_KEY_FILE,
+                 insert_linebreaks=False
                  ):
         self.convert_path = convert_path
         self.export_path = Path(str(export_path) + "\\" + os.path.basename(convert_path).split('/')[-1] + ".txt") 
         self.model_id = model_id
         self.openai_api_keys = JBGtranscriber.get_openai_api_keys(openai_api_keys_file)
+        self.insert_linebreaks = insert_linebreaks
         self.device, self.torch_dtype = JBGtranscriber.do_nvidia_check(device)
         
         self.transcription = ""
@@ -186,17 +188,20 @@ class JBGtranscriber():
                 generate_kwargs=generate_kwargs, 
                 return_timestamps=True)
         
-        self.transcription, self.transcription_w_timestamps = JBGtranscriber._postprocess_result(result)
+        self.transcription, self.transcription_w_timestamps = self._postprocess_result(result)
 
-    @staticmethod
-    def _postprocess_result(result):
+    def _postprocess_result(self, result):
         """Post process result of call to transcription model"""
         
-        transcription = JBGtranscriber.insert_newlines(result["text"], 80)
+        transcription = result["text"]
+        if self.insert_linebreaks:
+            transcription = JBGtranscriber.insert_newlines(transcription, 80)
+        
         transcription_w_timestamps = ""
         for chunk in result["chunks"]:
-            transcription_w_timestamps += str(chunk["timestamp"]) + ": " + \
-                JBGtranscriber.insert_newlines(str(chunk["text"]), 80) + "\n"
+            transcription_w_timestamps += str(chunk["timestamp"]) + ": " + str(chunk["text"]) + "\n"
+        if self.insert_linebreaks:
+            transcription_w_timestamps = JBGtranscriber.insert_newlines(transcription_w_timestamps, 80)
             
         return transcription, transcription_w_timestamps
 
