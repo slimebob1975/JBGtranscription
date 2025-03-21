@@ -13,7 +13,13 @@ async function uploadFile() {
     }
     
     let formData = new FormData();
+    // Add file
     formData.append("file", fileInput.files[0]);
+
+    // Add checkbox values
+    formData.append("summarize", document.getElementById("optSummary").checked);
+    formData.append("suspicious", document.getElementById("optSuspicious").checked);
+    formData.append("questions", document.getElementById("optQuestions").checked);
 
     let response = await fetch("/upload/", {
         method: "POST",

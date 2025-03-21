@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, BackgroundTasks
+from fastapi import FastAPI, File, UploadFile, BackgroundTasks, Form
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 import os
@@ -26,14 +26,15 @@ os.makedirs(RESULTS_FOLDER, exist_ok=True)
 os.chmod(RESULTS_FOLDER, 0o777)
 
 # Function to transcribe in the background
-def transcribe_audio(file_path: str, result_path: str, device: str):
+def transcribe_audio(file_path: str, result_path: str, device: str, summarize: bool, \
+    find_suspicious: bool, suggest_questions: bool):
     
     transcriber = JBGtranscriber.JBGtranscriber(Path(file_path), Path(result_path), device=device, \
         openai_api_keys_file=OPENAI_API_KEYS_FILE)
     
     try:
-        transcriber.perform_transcription_steps(generate_summary=True, find_suspicious_phrases=True,\
-            suggest_follow_up_questions=True)
+        transcriber.perform_transcription_steps(generate_summary=summarize, find_suspicious_phrases=find_suspicious,\
+            suggest_follow_up_questions=suggest_questions)
     except Exception as e:
         return JSONResponse({"Transcription error": str(e)}, status_code=500)
     else:
@@ -52,7 +53,10 @@ def clean_up_files(audio_file_path: Path, transcriptions_path: Path):
 
 # Entry point for uploading audio files
 @app.post("/upload/")
-async def upload_audio(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+async def upload_audio(background_tasks: BackgroundTasks, file: UploadFile = File(...), \
+    summarize: bool = Form(False), suspicious: bool = Form(False), questions: bool = Form(False)):
+    
+    print(summarize, suspicious, questions)
     
     file_id = str(uuid.uuid4())
     file_path = os.path.join(UPLOAD_FOLDER, file_id + ".mp3")
@@ -61,7 +65,7 @@ async def upload_audio(background_tasks: BackgroundTasks, file: UploadFile = Fil
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    background_tasks.add_task(transcribe_audio, file_path, result_path, DEVICE)
+    background_tasks.add_task(transcribe_audio, file_path, result_path, DEVICE, summarize, suspicious, questions)
 
     return JSONResponse({"message": "File uploaded, processing started.", "file_id": file_id})
 
