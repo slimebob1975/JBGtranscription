@@ -1,4 +1,5 @@
 async function uploadFile() {
+    
     let fileInput = document.getElementById("audioFile");
     if (fileInput.files.length === 0) {
         alert("Please select a file.");
@@ -21,6 +22,14 @@ async function uploadFile() {
     formData.append("suspicious", document.getElementById("optSuspicious").checked);
     formData.append("questions", document.getElementById("optQuestions").checked);
 
+    // Disable forms for this time
+    document.getElementById("audioFile").disabled = true;
+    document.getElementById("button").disabled = true;
+    document.getElementById("optSummary").disabled = true;
+    document.getElementById("optSuspicious").disabled = true;
+    document.getElementById("optQuestions").disabled = true;
+
+    // Do upload and wait for response
     let response = await fetch("/upload/", {
         method: "POST",
         body: formData
@@ -45,8 +54,7 @@ async function checkStatus(file_id) {
             spinner.style.display = "none";
 
             let result = await response.json();
-            document.getElementById("status").innerText = "Transkribering avslutad!";
-            
+            document.getElementById("status").innerText = "Transkribering avslutad. Tryck Ctrl-Shift-R för att köra igen!";
             
             document.getElementById("result").value = result.transcription;  
             document.getElementById("result").style.display = "inline"; 
