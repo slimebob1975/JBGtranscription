@@ -7,6 +7,7 @@ import shutil
 import uuid
 import src.JBGtranscriber as JBGtranscriber
 from pathlib import Path
+import torch
 
 from fastapi import FastAPI
 
@@ -18,7 +19,7 @@ except Exception as e:
 
 UPLOAD_FOLDER = "uploads"
 RESULTS_FOLDER = "results"
-DEVICE = "cpu"
+DEVICE = "gpu" if torch.cuda.is_available() else "cpu"
 OPENAI_API_KEYS_FILE = Path.cwd() / Path("./src/keys/openai_api_keys.json")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.chmod(UPLOAD_FOLDER, 0o777)
