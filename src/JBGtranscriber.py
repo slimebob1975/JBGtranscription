@@ -37,6 +37,7 @@ class JBGtranscriber():
         self.summary = ""
         self.marked_text = ""
         self.follow_up_questions = ""
+        self.analyze_speakers = ""
 
     @staticmethod
     def do_nvidia_check(preferred_device):
@@ -109,19 +110,18 @@ class JBGtranscriber():
         
         return [file for file in Path(path).rglob("*.mp3")]
 
-    def call_openai(self, prompt, max_tokens=500):
+    def call_openai(self, prompt):
         """Anropar OpenAI:s GPT-modell med en given prompt."""
         
         client = openai.OpenAI(api_key=self.openai_api_keys["OPENAI_API_KEY"], organization=self.openai_api_keys["OPENAI_ORG_KEY"])
 
         completion = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
             messages=[
                 {"role": "developer", "content": "Du är en expert på transkriberingar av ljudfiler från exempelvis intervjuer."},
                 {"role": "user", "content": prompt},
             ],
-            temperature=0.7,
-            max_tokens=max_tokens
+            temperature=0.7
         )
 
         return completion.choices[0].message
@@ -132,7 +132,7 @@ class JBGtranscriber():
         {self.transcription}"""
         
         try:
-            self.summary = self.call_openai(prompt, max_tokens=300)
+            self.summary = self.call_openai(prompt).content
         except Exception as e:
             print(f"An error occurred while generating the summary: {e}")
             self.summary = "Sammanfattning var inte tillgängligt"
@@ -140,11 +140,11 @@ class JBGtranscriber():
     def find_suspicious_phrases(self):
         """Identifierar och markerar osannolika eller grammatiskt tveksamma ordkombinationer."""
         prompt = f"""I följande transkribering, identifiera och markera tveksamma eller osannolika ordkombinationer 
-        som kan bero på fel i transkriberingen. Markera dessa genom att omsluta dem med markörerna [FEL?] och [/FEL?]:
+        som kan bero på fel i transkriberingen. Markera misstänkta fel genom att omsluta dem med markörerna [FEL?] och [/FEL?]:
         {self.transcription}"""
         
         try:
-            self.marked_text = self.call_openai(prompt, max_tokens=500)
+            self.marked_text = self.call_openai(prompt).content
         except Exception as e:
             print(f"An error occurred while finding suspicious phrases: {e}")
             self.marked_text = "Markering av misstänkta fel i texten misslyckades"
@@ -155,10 +155,41 @@ class JBGtranscriber():
         {self.transcription}"""
         
         try:
-            self.follow_up_questions = self.call_openai(prompt, max_tokens=200)
+            self.follow_up_questions = self.call_openai(prompt).content
         except Exception as e:
             print(f"An error occurred while generating follow-up questions: {e}")
             self.follow_up_questions = "Förslag till uppföljande frågor misslyckades"
+            
+    def do_analyze_speakers(self):
+        """Analysera transkriberingen med avseende på vilka talare som säger vad"""
+        prompt = f"""Du får en rå, odelad transkribering av en intervju med en eller flera intervjuare 
+            och en eller flera intervjuobjekt (t.ex. handläggare på en myndighet). Transkriberingen saknar talarangivelser.
+
+            Din uppgift är att:
+
+            1. Identifiera antal distinkta röster i texten, både intervjuare och intervjuobjekt.
+            2. Märka upp varje replik med en neutral beteckning som:
+            - Intervjuare 1, Intervjuare 2, osv.
+            - Intervjuobjekt 1, Intervjuobjekt 2, osv.
+            3. Om en person tydligt återkommer längre fram (t.ex. fortsätter prata), använd samma beteckning som tidigare.
+            4. Gör en tydlig radbrytning mellan varje replik, så att dialogen blir läsbar.
+
+            Du får inte hitta på namn. Skriv inget utanför själva dialogen.
+
+            Exempel på format:
+            Intervjuare 1: Kan du beskriva hur processen ser ut från att ett ärende kommer in?
+            Intervjuobjekt 1: Ja, först får vi ett meddelande...
+
+            Här är transkriberingen: 
+            ------------------------
+            {self.transcription}
+            ------------------------"""
+        
+        try:
+            self.analyze_speakers = self.call_openai(prompt).content
+        except Exception as e:
+            print(f"An error occurred while analyzing speakers: {e}")
+            self.analyze_speakers = "Försöket till talarsplitsning misslyckades"
 
     def transcribe(self):
         """Put together the model of choice and do the transcription"""
@@ -217,12 +248,15 @@ class JBGtranscriber():
                 if self.marked_text:
                     export_file.write("### Transkription med markerade misstänkta fraser:\n" + self.marked_text + "\n\n")
                 if self.follow_up_questions:
-                    export_file.write("### Uppföljningsfrågor:\n" + self.follow_up_questions + "\n")
+                    export_file.write("### Uppföljningsfrågor:\n" + self.follow_up_questions + "\n\n")
+                if self.analyze_speakers:
+                    export_file.write("### Försök till identifiering av olika talare:\n" + self.analyze_speakers + "\n")
+                    
         except Exception as ex:
             print(f"Something went wrong on writing transcription results to the file {self.export_path}: {str(ex)}")
             
     def perform_transcription_steps(self, generate_summary=False, find_suspicious_phrases=False,\
-        suggest_follow_up_questions=False):
+        suggest_follow_up_questions=False, analyze_speakers=False):
         """Perform all transcription steps"""
         
         # Transcribe the audio files
@@ -230,15 +264,30 @@ class JBGtranscriber():
         
         # Generate a summary if requested
         if generate_summary:
+            print("Generating summary")
             self.generate_summary()
+            print("Summary generated successfully.")
         
         # Find and mark suspicious phrases if requested
         if find_suspicious_phrases:
+            print("Finding suspicious phrases")
             self.find_suspicious_phrases()
+            print("Suspicious phrases found successfully.")
         
         # Suggest follow-up questions if requested
         if suggest_follow_up_questions:
+            print("Suggesting follow-up questions")
             self.suggest_follow_up_questions()
+            print("Follow-up questions suggested successfully.")
+            
+        # Analyze speakers if requested
+        if analyze_speakers:
+            print("Analyzing speakers")
+            self.do_analyze_speakers()
+            print("Speakers analyzed successfully.")
+        
+        # Print a message confirming successful completion
+        print("All transcription steps completed successfully.")
             
         # Write the transcription results to an output file
         self.write_to_output_file()
@@ -301,6 +350,9 @@ def main():
 
         # Generate follow up questions
         jbg_transcriber.suggest_follow_up_questions()
+        
+         # Generate speaker analysis
+        jbg_transcriber.analyze_speakers()
 
         # Print result to text file
         jbg_transcriber.write_to_output_file()

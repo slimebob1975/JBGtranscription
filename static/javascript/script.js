@@ -21,6 +21,8 @@ async function uploadFile() {
     formData.append("summarize", document.getElementById("optSummary").checked);
     formData.append("suspicious", document.getElementById("optSuspicious").checked);
     formData.append("questions", document.getElementById("optQuestions").checked);
+    formData.append("speakers", document.getElementById("optSpeakers").checked);
+
 
     // Disable forms for this time
     document.getElementById("audioFile").disabled = true;
@@ -28,6 +30,7 @@ async function uploadFile() {
     document.getElementById("optSummary").disabled = true;
     document.getElementById("optSuspicious").disabled = true;
     document.getElementById("optQuestions").disabled = true;
+    document.getElementById("optSpeakers").disabled = true;
 
     // Do upload and wait for response
     let response = await fetch("/upload/", {
