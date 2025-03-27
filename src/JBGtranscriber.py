@@ -7,6 +7,8 @@ try:
     import openai
     from pathlib import Path
     import json
+    import tiktoken
+    import time
 except ModuleNotFoundError as ex:
     sys.exit("You probably need to install some missing modules:" + str(ex))
     
@@ -16,6 +18,27 @@ class JBGtranscriber():
     OPENAI_API_KEY_FILE = Path("./keys/openai_api_keys.json")
     MODEL_ID = "KBLab/kb-whisper-large"
     CACHE_DIR = ".cache"
+    
+    OPENAI_MODEL = "gpt-4o" # Alternatives: gpt-4-turbo
+    
+    DIARIZE_PROMPT = f"""Du får en rå, odelad transkribering av en intervju med en eller flera intervjuare 
+            och en eller flera intervjuobjekt (t.ex. handläggare på en myndighet). Transkriberingen saknar talarangivelser.
+
+            Din uppgift är att:
+
+            1. Identifiera antal distinkta röster i texten, både intervjuare och intervjuobjekt.
+            2. Märka upp varje replik med en neutral beteckning som:
+            - Intervjuare 1, Intervjuare 2, osv.
+            - Intervjuobjekt 1, Intervjuobjekt 2, osv.
+            3. Om en person tydligt återkommer längre fram (t.ex. fortsätter prata), använd samma beteckning som tidigare.
+            4. Gör en tydlig radbrytning mellan varje replik, så att dialogen blir läsbar.
+
+            Du får inte hitta på namn. Skriv inget utanför själva dialogen.
+
+            Exempel på format:
+            Intervjuare 1: Kan du beskriva hur processen ser ut från att ett ärende kommer in?
+            Intervjuobjekt 1: Ja, först får vi ett meddelande...
+            """
     
     def __init__(self, 
                  convert_path,
@@ -110,7 +133,23 @@ class JBGtranscriber():
         
         return [file for file in Path(path).rglob("*.mp3")]
 
-    def call_openai(self, prompt):
+    def call_openai_simple(self, prompt):
+        """Anropar OpenAI:s GPT-modell med en given prompt."""
+        
+        client = openai.OpenAI(api_key=self.openai_api_keys["OPENAI_API_KEY"], organization=self.openai_api_keys["OPENAI_ORG_KEY"])
+
+        completion = client.chat.completions.create(
+            model= JBGtranscriber.OPENAI_MODEL,
+            messages=[
+                {"role": "developer", "content": "Du är en expert på transkriberingar av ljudfiler från exempelvis intervjuer."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.7
+        )
+
+        return completion.choices[0].message
+    
+    def call_openai(self, instructions, input_message):
         """Anropar OpenAI:s GPT-modell med en given prompt."""
         
         client = openai.OpenAI(api_key=self.openai_api_keys["OPENAI_API_KEY"], organization=self.openai_api_keys["OPENAI_ORG_KEY"])
@@ -118,8 +157,8 @@ class JBGtranscriber():
         completion = client.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {"role": "developer", "content": "Du är en expert på transkriberingar av ljudfiler från exempelvis intervjuer."},
-                {"role": "user", "content": prompt},
+                {"role": "system", "content": instructions},
+                {"role": "user", "content": input_message},
             ],
             temperature=0.7
         )
@@ -132,7 +171,7 @@ class JBGtranscriber():
         {self.transcription}"""
         
         try:
-            self.summary = self.call_openai(prompt).content
+            self.summary = self.call_openai_simple(prompt).content
         except Exception as e:
             print(f"An error occurred while generating the summary: {e}")
             self.summary = "Sammanfattning var inte tillgängligt"
@@ -144,7 +183,7 @@ class JBGtranscriber():
         {self.transcription}"""
         
         try:
-            self.marked_text = self.call_openai(prompt).content
+            self.marked_text = self.call_openai_simple(prompt).content
         except Exception as e:
             print(f"An error occurred while finding suspicious phrases: {e}")
             self.marked_text = "Markering av misstänkta fel i texten misslyckades"
@@ -155,42 +194,73 @@ class JBGtranscriber():
         {self.transcription}"""
         
         try:
-            self.follow_up_questions = self.call_openai(prompt).content
+            self.follow_up_questions = self.call_openai_simple(prompt).content
         except Exception as e:
             print(f"An error occurred while generating follow-up questions: {e}")
             self.follow_up_questions = "Förslag till uppföljande frågor misslyckades"
             
     def do_analyze_speakers(self):
         """Analysera transkriberingen med avseende på vilka talare som säger vad"""
-        prompt = f"""Du får en rå, odelad transkribering av en intervju med en eller flera intervjuare 
-            och en eller flera intervjuobjekt (t.ex. handläggare på en myndighet). Transkriberingen saknar talarangivelser.
-
-            Din uppgift är att:
-
-            1. Identifiera antal distinkta röster i texten, både intervjuare och intervjuobjekt.
-            2. Märka upp varje replik med en neutral beteckning som:
-            - Intervjuare 1, Intervjuare 2, osv.
-            - Intervjuobjekt 1, Intervjuobjekt 2, osv.
-            3. Om en person tydligt återkommer längre fram (t.ex. fortsätter prata), använd samma beteckning som tidigare.
-            4. Gör en tydlig radbrytning mellan varje replik, så att dialogen blir läsbar.
-
-            Du får inte hitta på namn. Skriv inget utanför själva dialogen.
-
-            Exempel på format:
-            Intervjuare 1: Kan du beskriva hur processen ser ut från att ett ärende kommer in?
-            Intervjuobjekt 1: Ja, först får vi ett meddelande...
+        
+        prompt = JBGtranscriber.DIARIZE_PROMPT
+        input_message = f"""
 
             Här är transkriberingen: 
             ------------------------
             {self.transcription}
-            ------------------------"""
+            ------------------------
+        """
         
         try:
-            self.analyze_speakers = self.call_openai(prompt).content
+            self.analyze_speakers = self.call_openai(instructions=prompt, input_message=input_message).content
         except Exception as e:
             print(f"An error occurred while analyzing speakers: {e}")
-            self.analyze_speakers = "Försöket till talarsplitsning misslyckades"
+            self.analyze_speakers = "Försöket till identifiering av talare misslyckades"
 
+    def do_analyze_speakers_splitted(self):
+        
+        # Max tokens per segment (input + output bör hållas < 8000 tokens)
+        MAX_INPUT_TOKENS = 3500
+        OVERLAP_TOKENS = 300
+        
+        # Some internal help functions
+        def tokenize(text):
+            return enc.encode(text)
+
+        def detokenize(tokens):
+            return enc.decode(tokens)
+        
+        def split_into_segments(text, max_tokens=MAX_INPUT_TOKENS, overlap=OVERLAP_TOKENS):
+            tokens = tokenize(text)
+            segments = []
+            i = 0
+            while i < len(tokens):
+                segment = tokens[i:i + max_tokens]
+                segments.append(detokenize(segment))
+                i += max_tokens - overlap
+            print(f"Text has {len(tokens)} tokens and results in {len(segments)} segments")
+            return segments
+        
+        prompt = JBGtranscriber.DIARIZE_PROMPT
+        
+        enc = tiktoken.encoding_for_model(JBGtranscriber.OPENAI_MODEL)
+        
+        segments = split_into_segments(self.transcription)
+        diarized_segments = []
+
+        try:
+            for i, segment in enumerate(segments):
+                if i>0: 
+                    time.sleep(5)  # undvik rate limit for multiple API calls
+                print(f"Bearbetar segment {i+1}/{len(segments)}...")
+                context = f"\nDetta är del {i+1}. Fortsätt numrera talare konsekvent.\n"
+                diarized = self.call_openai(instructions=prompt+context, input_message=segment).content
+                diarized_segments.append(diarized)
+            self.analyze_speakers = ("\n\n".join(diarized_segments))
+        except Exception as e:
+            print(f"An error occurred while analyzing speakers: {e}")
+            self.analyze_speakers = "Försöket till identifiering av talare misslyckades"
+    
     def transcribe(self):
         """Put together the model of choice and do the transcription"""
         
@@ -283,7 +353,8 @@ class JBGtranscriber():
         # Analyze speakers if requested
         if analyze_speakers:
             print("Analyzing speakers")
-            self.do_analyze_speakers()
+            #self.do_analyze_speakers()
+            self.do_analyze_speakers_splitted()
             print("Speakers analyzed successfully.")
         
         # Print a message confirming successful completion
@@ -352,7 +423,7 @@ def main():
         jbg_transcriber.suggest_follow_up_questions()
         
          # Generate speaker analysis
-        jbg_transcriber.analyze_speakers()
+        jbg_transcriber.do_analyze_speakers()
 
         # Print result to text file
         jbg_transcriber.write_to_output_file()
