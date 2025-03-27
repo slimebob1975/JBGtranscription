@@ -223,43 +223,50 @@ class JBGtranscriber():
         MAX_INPUT_TOKENS = 3500
         OVERLAP_TOKENS = 300
         
+        # Setup encoder for model
+        enc = tiktoken.encoding_for_model(JBGtranscriber.OPENAI_MODEL)
+        
         # Some internal help functions
-        def tokenize(text):
+        def _tokenize(text, enc):
             return enc.encode(text)
 
-        def detokenize(tokens):
+        def _detokenize(tokens, enc):
             return enc.decode(tokens)
         
-        def split_into_segments(text, max_tokens=MAX_INPUT_TOKENS, overlap=OVERLAP_TOKENS):
-            tokens = tokenize(text)
+        def _split_into_segments(text, enc, max_tokens=MAX_INPUT_TOKENS, overlap=OVERLAP_TOKENS):
+            tokens = _tokenize(text, enc)
             segments = []
             i = 0
             while i < len(tokens):
                 segment = tokens[i:i + max_tokens]
-                segments.append(detokenize(segment))
+                segments.append(_detokenize(segment, enc))
                 i += max_tokens - overlap
             print(f"Text has {len(tokens)} tokens and results in {len(segments)} segments")
             return segments
         
-        prompt = JBGtranscriber.DIARIZE_PROMPT
+        segments = _split_into_segments(self.transcription, enc)
         
-        enc = tiktoken.encoding_for_model(JBGtranscriber.OPENAI_MODEL)
-        
-        segments = split_into_segments(self.transcription)
-        diarized_segments = []
+        # No need to split text into segments
+        if len(segments) == 1:
+            self.do_analyze_speakers()
+        else:
+            # Text resulted in multiple segments
+            diarized_segments = []
+            prompt = JBGtranscriber.DIARIZE_PROMPT
 
-        try:
-            for i, segment in enumerate(segments):
-                if i>0: 
-                    time.sleep(5)  # undvik rate limit for multiple API calls
-                print(f"Bearbetar segment {i+1}/{len(segments)}...")
-                context = f"\nDetta är del {i+1}. Fortsätt numrera talare konsekvent.\n"
-                diarized = self.call_openai(instructions=prompt+context, input_message=segment).content
-                diarized_segments.append(diarized)
-            self.analyze_speakers = ("\n\n".join(diarized_segments))
-        except Exception as e:
-            print(f"An error occurred while analyzing speakers: {e}")
-            self.analyze_speakers = "Försöket till identifiering av talare misslyckades"
+            try:
+                for i, segment in enumerate(segments):
+                    if i>0: 
+                        time.sleep(5)  # undvik rate limit for multiple API calls
+                    print(f"Bearbetar segment {i+1}/{len(segments)}...")
+                    context = f"\nDetta är del {i+1}. Fortsätt numrera talare konsekvent.\n"
+                    diarized = self.call_openai(instructions=prompt+context, input_message=segment).content
+                    diarized_segments.append(diarized)
+                self.analyze_speakers = ("\n\n".join(diarized_segments))
+            except Exception as e:
+                print(f"An error occurred while analyzing speakers: {e}")
+                self.analyze_speakers = "Försöket till identifiering av talare misslyckades"
+             
     
     def transcribe(self):
         """Put together the model of choice and do the transcription"""
