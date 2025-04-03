@@ -16,6 +16,11 @@
         <!-- File selector -->
         <input type="file" id="audioFile" accept=".mp3,audio/mpeg"> 
 
+        <!-- A spinner that spins while transcribing -->
+        <div id="spinner-container">
+            <div class="spinner"></div>
+        </div>
+
         <!-- Display checkboxes for OpenAI API call options -->
         <fieldset style="margin-top: 1rem;" id="ai-options">
             <legend><h4>Lägg till AI-baserad analys</h4></legend>
@@ -47,10 +52,6 @@
         <!-- Download Transcription -->
         <a id="downloadLink" href="#" download>Ladda ner transkriberingen</a>
 
-        <!-- A spinner that spins while transcribing -->
-        <div id="spinner-container">
-            <div class="spinner"></div>
-        </div>
     </div> <!-- Wrapper -->
 
 </body>

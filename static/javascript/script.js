@@ -1,4 +1,12 @@
 async function uploadFile() {
+    // Load saved API key from localStorage on page load
+    document.addEventListener("DOMContentLoaded", () => {
+        const savedKey = localStorage.getItem("openai_api_key");
+        if (savedKey) {
+        document.getElementById("apiKey").value = savedKey;
+        }
+    });
+    
     
     document.addEventListener("DOMContentLoaded", () => {
         const apiKeyInput = document.getElementById("apiKey");
@@ -52,6 +60,9 @@ async function uploadFile() {
     document.getElementById("optQuestions").disabled = true;
     document.getElementById("optSpeakers").disabled = true;
 
+    // Store the api key locally
+    localStorage.setItem("openai_api_key", apiKey);
+    
     // Do upload and wait for response
     let response = await fetch("/upload/", {
         method: "POST",
