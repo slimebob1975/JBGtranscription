@@ -1,5 +1,19 @@
 async function uploadFile() {
     
+    document.addEventListener("DOMContentLoaded", () => {
+        const apiKeyInput = document.getElementById("apiKey");
+        const checkboxes = [
+            document.getElementById("optSummary"),
+            document.getElementById("optSuspicious"),
+            document.getElementById("optQuestions")
+        ];
+    
+        apiKeyInput.addEventListener("input", () => {
+            const hasKey = apiKeyInput.value.trim().length > 0;
+            checkboxes.forEach(cb => cb.disabled = !hasKey);
+        });
+    });
+    
     let fileInput = document.getElementById("audioFile");
     if (fileInput.files.length === 0) {
         alert("Please select a file.");
@@ -16,6 +30,12 @@ async function uploadFile() {
     let formData = new FormData();
     // Add file
     formData.append("file", fileInput.files[0]);
+
+    // Add API key
+    formData.append("api_key", document.getElementById("apiKey").value.trim());
+
+    // Add model selection
+    formData.append("model", document.getElementById("modelSelect").value);
 
     // Add checkbox values
     formData.append("summarize", document.getElementById("optSummary").checked);

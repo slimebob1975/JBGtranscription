@@ -15,8 +15,7 @@ except ModuleNotFoundError as ex:
 class JBGtranscriber():
     
     # Standard Settings
-    OPENAI_API_KEY_FILE = Path("./keys/openai_api_keys.json")
-    MODEL_ID = "KBLab/kb-whisper-large"
+    TRANSCRIBER_MODEL_ID = "KBLab/kb-whisper-large"
     CACHE_DIR = ".cache"
     
     OPENAI_MODEL = "gpt-4o" # Alternatives: gpt-4-turbo
@@ -44,14 +43,16 @@ class JBGtranscriber():
                  convert_path,
                  export_path = Path("."),
                  device = "cpu",
-                 model_id=MODEL_ID, 
-                 openai_api_keys_file=OPENAI_API_KEY_FILE,
+                 api_key = None,
+                 openai_model = "gpt-4o",
+                 transcriber_model_id=TRANSCRIBER_MODEL_ID,
                  insert_linebreaks=False
                  ):
         self.convert_path = convert_path
         self.export_path = Path(str(export_path) + "\\" + os.path.basename(convert_path).split('/')[-1] + ".txt") 
-        self.model_id = model_id
-        self.openai_api_keys = JBGtranscriber.get_openai_api_keys(openai_api_keys_file)
+        self.api_key = api_key
+        self.openai_model = openai_model
+        self.transcriber_model_id = transcriber_model_id
         self.insert_linebreaks = insert_linebreaks
         self.device, self.torch_dtype = JBGtranscriber.do_nvidia_check(device)
         
@@ -81,20 +82,6 @@ class JBGtranscriber():
         # Set datatype and models        
         return device, torch_dtype
 
-    @staticmethod
-    def get_openai_api_keys(path_to_keys_file):
-        
-        """
-        Reads the OpenAI API keys file and returns the keys as a dictionary with the following dictionary keys:
-            OPENAI_API_KEY
-            OPENAI_ORG_KEY
-            OPENAI_GRP_KEY (optional)
-        """
-        
-        with open(path_to_keys_file) as keys_file:
-            data = keys_file.read()
-        return json.loads(data)
-    
     @staticmethod
     def insert_newlines(string, n):
         """
@@ -136,10 +123,10 @@ class JBGtranscriber():
     def call_openai_simple(self, prompt):
         """Anropar OpenAI:s GPT-modell med en given prompt."""
         
-        client = openai.OpenAI(api_key=self.openai_api_keys["OPENAI_API_KEY"], organization=self.openai_api_keys["OPENAI_ORG_KEY"])
+        client = openai.OpenAI(api_key=self.api_key)
 
         completion = client.chat.completions.create(
-            model= JBGtranscriber.OPENAI_MODEL,
+            model= self.openai_model,
             messages=[
                 {"role": "developer", "content": "Du är en expert på transkriberingar av ljudfiler från exempelvis intervjuer."},
                 {"role": "user", "content": prompt},
@@ -152,10 +139,10 @@ class JBGtranscriber():
     def call_openai(self, instructions, input_message):
         """Anropar OpenAI:s GPT-modell med en given prompt."""
         
-        client = openai.OpenAI(api_key=self.openai_api_keys["OPENAI_API_KEY"], organization=self.openai_api_keys["OPENAI_ORG_KEY"])
+        client = openai.OpenAI(api_key=self.api_key)
 
         completion = client.chat.completions.create(
-            model="gpt-4o",
+            model=self.openai_model,
             messages=[
                 {"role": "system", "content": instructions},
                 {"role": "user", "content": input_message},
@@ -273,10 +260,10 @@ class JBGtranscriber():
         
         # What model to use
         model = AutoModelForSpeechSeq2Seq.from_pretrained(
-            self.model_id, torch_dtype=self.torch_dtype, use_safetensors=True, cache_dir=JBGtranscriber.CACHE_DIR
+            self.transcriber_model_id, torch_dtype=self.torch_dtype, use_safetensors=True, cache_dir=JBGtranscriber.CACHE_DIR
         )
         model.to(self.device)
-        processor = AutoProcessor.from_pretrained(self.model_id)
+        processor = AutoProcessor.from_pretrained(self.transcriber_model_id)
 
         # Define pipeline
         pipe = pipeline(
@@ -371,26 +358,25 @@ class JBGtranscriber():
         self.write_to_output_file()
 
 def check_script_arguments():
-    """Check in arguments to test script""" 
-    
-    if len(sys.argv) < 4:
-        sys.exit("Usage: " + (sys.argv)[0] + " [path to mp3 file(s) to convert] [path to preferred transcription directory] [device=gpu/cpu]")
-    else:
-        convert_path = os.path.abspath(sys.argv[1])
-        if not (os.path.exists(convert_path) or os.path.isdir(convert_path)):
-            sys.exit("{0} is not a valid file or directory path".format(convert_path))
-        print("Convert file(s) path: ", convert_path)
-        
-        export_path = os.path.abspath(sys.argv[2])
-        if not os.path.isdir(export_path):
-            sys.exit("{0} is not a valid directory path".format(export_path))
-        print("Export file path: ", export_path)    
-        
-        device = str(sys.argv[3])
-        if device.lower() not in ['gpu', 'cpu']:
-            sys.exit("Device must be set to 'gpu' or 'cpu', got '{0}'").format(device)
-        
-    return Path(convert_path), Path(export_path), device
+    """Check command-line arguments for the test script""" 
+    if len(sys.argv) < 5:
+        sys.exit("Usage: " + sys.argv[0] + " [path to .mp3 file or folder] [output folder] [device=gpu/cpu] [openai_api_key] (optional: model)")
+
+    convert_path = Path(sys.argv[1])
+    export_path = Path(sys.argv[2])
+    device = sys.argv[3].lower()
+    api_key = sys.argv[4]
+    model = sys.argv[5] if len(sys.argv) > 5 else "gpt-4o"
+
+    if not convert_path.exists():
+        sys.exit(f"{convert_path} is not a valid file or directory path")
+    if not export_path.is_dir():
+        sys.exit(f"{export_path} is not a valid directory path")
+    if device not in ["cpu", "gpu"]:
+        sys.exit("Device must be 'cpu' or 'gpu'")
+
+    return convert_path, export_path, device, api_key, model
+
 
 def main():
     """

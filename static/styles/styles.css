@@ -52,6 +52,21 @@ button:hover {
     color: #2979be;
 }
 
+#modelSelect {
+    padding: 4px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+#ai-options {
+    padding: 1rem;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    background-color: #f9f9f9;
+    max-width: 500px;
+    margin-bottom: 1.5rem;
+}
+
 #result {
     font-family: monospace;
     width: 100%;

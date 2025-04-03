@@ -27,11 +27,11 @@ os.makedirs(RESULTS_FOLDER, exist_ok=True)
 os.chmod(RESULTS_FOLDER, 0o777)
 
 # Function to transcribe in the background
-def transcribe_audio(file_path: str, result_path: str, device: str, summarize: bool, \
+def transcribe_audio(file_path: str, result_path: str, device: str, api_key:str, model: str, summarize: bool, \
     find_suspicious: bool, suggest_questions: bool, analyze_speakers: bool):
     
     transcriber = JBGtranscriber.JBGtranscriber(Path(file_path), Path(result_path), device=device, \
-        openai_api_keys_file=OPENAI_API_KEYS_FILE)
+        api_key=api_key)
     
     try:
         transcriber.perform_transcription_steps(generate_summary=summarize, find_suspicious_phrases=find_suspicious,\
@@ -55,10 +55,12 @@ def clean_up_files(audio_file_path: Path, transcriptions_path: Path):
 # Entry point for uploading audio files
 @app.post("/upload/")
 async def upload_audio(background_tasks: BackgroundTasks, file: UploadFile = File(...), \
-    summarize: bool = Form(False), suspicious: bool = Form(False), questions: bool = Form(False), \
-    speakers: bool = Form(False)):
+    api_key: str = Form(...), model: str = Form("gpt-4o"), summarize: bool = Form(False), suspicious: bool = Form(False), \
+    questions: bool = Form(False), speakers: bool = Form(False)):
     
     print(f"""
+          OpenAI API key was provided: {api_key != "sk-..."}\n
+          OpenAI model of choice: {model}\n
           OpenAI API tasks: \n
           \tSummary: {summarize} \n
           \tMark suspicious: {suspicious} \n
@@ -73,7 +75,8 @@ async def upload_audio(background_tasks: BackgroundTasks, file: UploadFile = Fil
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    background_tasks.add_task(transcribe_audio, file_path, result_path, DEVICE, summarize, suspicious, questions, speakers)
+    background_tasks.add_task(transcribe_audio, file_path, result_path, DEVICE, api_key, model, \
+        summarize, suspicious, questions, speakers)
 
     return JSONResponse({"message": "File uploaded, processing started.", "file_id": file_id})
 

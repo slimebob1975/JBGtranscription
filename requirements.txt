@@ -1,7 +1,7 @@
-openai
-torch
-transformers
 fastapi
-uvicorn
+uvicorn[standard]
 gunicorn
 python-multipart
+aiofiles
+openai
+httpx
