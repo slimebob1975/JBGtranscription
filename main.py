@@ -27,11 +27,11 @@ os.makedirs(RESULTS_FOLDER, exist_ok=True)
 os.chmod(RESULTS_FOLDER, 0o777)
 
 # Function to transcribe in the background
-def transcribe_audio(file_path: str, result_path: str, device: str, api_key:str, model: str, summarize: bool, \
+def transcribe_audio(file_path: str, result_path: str, device: str, api_key:str, openai_model: str, summarize: bool, \
     find_suspicious: bool, suggest_questions: bool, analyze_speakers: bool):
     
     transcriber = JBGtranscriber.JBGtranscriber(Path(file_path), Path(result_path), device=device, \
-        api_key=api_key)
+        api_key=api_key, openai_model = openai_model)
     
     try:
         transcriber.perform_transcription_steps(generate_summary=summarize, find_suspicious_phrases=find_suspicious,\

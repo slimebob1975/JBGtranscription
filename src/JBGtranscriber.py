@@ -379,47 +379,35 @@ def check_script_arguments():
 
 
 def main():
-    """
-    The main program of this little script
-    """
-    
-    # We need correct arguments passed to the script
-    convert_path, export_path, device = check_script_arguments()
-    
-    # Generate a list of files to transcribe
-    if os.path.isdir(convert_path):
+    # Parse arguments
+    convert_path, export_path, device, api_key, model = check_script_arguments()
+
+    # Gather files to process
+    if convert_path.is_dir():
         convert_files = JBGtranscriber.find_mp3_files(convert_path)
-    elif os.path.exists(convert_path):
-        convert_files = [convert_path]
     else:
-        sys.exit("Could not find any files to transcribe at {0}".format(convert_path))
-    
-    # Perform transcription
+        convert_files = [convert_path]
+
     for convert_file in convert_files:
-        
-        print("Processing {0}".format(convert_file))
-        
-        # Create the transcription class
-        jbg_transcriber = JBGtranscriber(convert_file, export_path, device)
-        
-        # Make transcription
-        jbg_transcriber.transcribe()
-        
-        # Make calls to OpenAI API to generate extra information
-        # Summary
-        jbg_transcriber.generate_summary()
+        print(f"Processing {convert_file.name}...")
 
-        # Mark suspicious phrases
-        jbg_transcriber.find_suspicious_phrases()
+        # Instantiate transcriber with all required params
+        transcriber = JBGtranscriber(
+            convert_path=convert_file,
+            export_path=export_path,
+            device=device,
+            api_key=api_key,
+            openai_model=model
+        )
 
-        # Generate follow up questions
-        jbg_transcriber.suggest_follow_up_questions()
-        
-         # Generate speaker analysis
-        jbg_transcriber.do_analyze_speakers()
+        # Run all steps
+        transcriber.perform_transcription_steps(
+            generate_summary=True,
+            find_suspicious_phrases=True,
+            suggest_follow_up_questions=True,
+            analyze_speakers=True
+        )
 
-        # Print result to text file
-        jbg_transcriber.write_to_output_file()
     
 # In case of commande line execution call
 if __name__=="__main__":
