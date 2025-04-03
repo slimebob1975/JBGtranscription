@@ -89,6 +89,7 @@ Then open your browser at:
    - ✔️ Summary
    - ✔️ Suspicious phrase detection
    - ✔️ Follow-up questions
+   - ✔️ Speaker diarization (beta)
 5. **Click "Ladda upp"**
 
 📄 The transcription will appear when ready, with a download link to the full `.txt` file.
@@ -105,7 +106,7 @@ Each optional AI checkbox triggers a different OpenAI-powered feature:
 - **Summary**: Condenses the transcription into key points.
 - **Suspicious Phrases**: Flags content that could be controversial or sensitive.
 - **Follow-up Questions**: Suggests possible questions to dig deeper into the discussion.
-- **Try to identify different speakers**: Suggests different speakers in the transcribed material.
+- **Try to identify different speakers (beta)**: Suggests different speakers in the transcribed material.
 
 All results are included in the output `.txt`.
 
