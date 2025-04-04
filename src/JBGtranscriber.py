@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 try:
     import sys
-    import os
+    import hashlib
     import torch
     from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
     import openai
@@ -12,11 +12,14 @@ try:
 except ModuleNotFoundError as ex:
     sys.exit("You probably need to install some missing modules:" + str(ex))
     
+CACHE_TRANSCRIPTION_MARKER = "===TRANSCRIPTION==="
+CACHE_TIMESTAMPED_MARKER = "===TIMESTAMPED==="
+    
 class JBGtranscriber():
     
     # Standard Settings
     TRANSCRIBER_MODEL_ID = "KBLab/kb-whisper-large"
-    CACHE_DIR = ".cache"
+    CACHE_DIR = "kb-whisper-cache"
         
     def __init__(self, 
                  convert_path,
@@ -108,6 +111,13 @@ class JBGtranscriber():
         
         return [file for file in Path(path).rglob("*.mp3")]
 
+    def get_transcription_cache_path(self):
+        """Generate a cache filename based on the audio file's full path (hashed)."""
+        with open(self.convert_path, "rb") as f:
+            file_hash = hashlib.md5(f.read()).hexdigest()
+        cache_file = Path("cache") / f"{file_hash}.txt"
+        return cache_file
+    
     def call_openai_simple(self, prompt):
         """Anropar OpenAI:s GPT-modell med en given prompt."""
         
@@ -249,7 +259,21 @@ class JBGtranscriber():
     
     def transcribe(self):
         """Put together the model of choice and do the transcription"""
-        
+    
+        # Ensure cache directory exists
+        Path("cache").mkdir(exist_ok=True)
+
+        # Check cache
+        cache_file = self.get_transcription_cache_path()
+        if cache_file.exists():
+            print(f"[INFO] Using cached transcription: {cache_file.name}")
+            with open(cache_file, "r", encoding="utf-8") as f:
+                content = f.read()
+                parts = content.split(CACHE_TIMESTAMPED_MARKER)
+                self.transcription = parts[0].replace(CACHE_TRANSCRIPTION_MARKER, "").strip()
+                self.transcription_w_timestamps = parts[1].strip() if len(parts) > 1 else ""
+            return
+    
         # What model to use
         model = AutoModelForSpeechSeq2Seq.from_pretrained(
             self.transcriber_model_id, torch_dtype=self.torch_dtype, use_safetensors=True, cache_dir=JBGtranscriber.CACHE_DIR
@@ -276,6 +300,14 @@ class JBGtranscriber():
                 return_timestamps=True)
         
         self.transcription, self.transcription_w_timestamps = self._postprocess_result(result)
+        
+        with open(cache_file, "w", encoding="utf-8") as f:
+            f.write(f"{CACHE_TRANSCRIPTION_MARKER}\n")
+            f.write(self.transcription + "\n")
+            f.write(f"\n{CACHE_TIMESTAMPED_MARKER}\n")
+            f.write(self.transcription_w_timestamps)
+        
+        print(f"[INFO] Transcription and timestamps cached as: {cache_file.name}")
 
     def _postprocess_result(self, result):
         """Post process result of call to transcription model"""
@@ -403,7 +435,7 @@ def main():
 
         # Run all steps
         transcriber.perform_transcription_steps(
-            generate_summary=True,,
+            generate_summary=True,
             summary_style=summary_style,
             find_suspicious_phrases=True,
             suggest_follow_up_questions=True,

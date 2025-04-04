@@ -16,11 +16,6 @@
         <!-- File selector -->
         <input type="file" id="audioFile" accept=".mp3,audio/mpeg"> 
 
-        <!-- A spinner that spins while transcribing -->
-        <div id="spinner-container">
-            <div class="spinner"></div>
-        </div>
-
         <!-- Display checkboxes for OpenAI API call options -->
         <fieldset style="margin-top: 1rem;" id="ai-options">
             <legend><h4>Lägg till AI-baserad analys</h4></legend>
@@ -28,10 +23,10 @@
             <input type="password" id="apiKey" placeholder="sk-..." style="width: 100%; max-width: 400px;"><br><br>
             <label for="modelSelect">Välj modell:</label><br>
             <select id="modelSelect" style="width: 100%; max-width: 400px;">
-                <option value="gpt-4o" selected>gpt-4o</option>
-                <option value="gpt-4">gpt-4</option>
-                <option value="gpt-4-turbo">gpt-4-turbo</option>
-                <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+                <option value="gpt-4o" selected>gpt-4o - Ny snabb & billig GPT-4-modell</option>
+                <option value="gpt-4">gpt-4 – Högsta noggrannhet, långsammare, dyrare</option>
+                <option value="gpt-4-turbo">gpt-4-turbo – Snabbare, billigare, mycket hög kvalitet</option>
+                <option value="gpt-3.5-turbo">gpt-3.5-turbo – Snabbast och billigast, men mindre exakt</option>
             </select><br><br>
             <label><input type="checkbox" id="optSummary"> Generera sammanfattning</label>
             <div id="summaryOptions" style="margin-left: 1rem; display: none;">
@@ -48,6 +43,11 @@
         
         <!-- Display upload status -->
         <p id="status"></p>
+
+        <!-- A spinner that spins while transcribing -->
+        <div id="spinner-container">
+            <div class="spinner"></div>
+        </div>
         
         <!-- Display transcription text -->
         <!-- Scrollable textarea for transcription output -->
