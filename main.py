@@ -28,14 +28,19 @@ os.chmod(RESULTS_FOLDER, 0o777)
 
 # Function to transcribe in the background
 def transcribe_audio(file_path: str, result_path: str, device: str, api_key:str, openai_model: str, summarize: bool, \
-    find_suspicious: bool, suggest_questions: bool, analyze_speakers: bool):
+    summary_style: str, suspicious: bool, questions: bool, speakers: bool):
     
     transcriber = JBGtranscriber.JBGtranscriber(Path(file_path), Path(result_path), device=device, \
         api_key=api_key, openai_model = openai_model)
     
     try:
-        transcriber.perform_transcription_steps(generate_summary=summarize, find_suspicious_phrases=find_suspicious,\
-            suggest_follow_up_questions=suggest_questions, analyze_speakers=analyze_speakers)
+       transcriber.perform_transcription_steps(
+        generate_summary=summarize,
+        summary_style=summary_style,
+        find_suspicious_phrases=suspicious,
+        suggest_follow_up_questions=questions,
+        analyze_speakers=speakers
+    )
     except Exception as e:
         return JSONResponse({"Transcription error": str(e)}, status_code=500)
     else:
@@ -54,15 +59,23 @@ def clean_up_files(audio_file_path: Path, transcriptions_path: Path):
 
 # Entry point for uploading audio files
 @app.post("/upload/")
-async def upload_audio(background_tasks: BackgroundTasks, file: UploadFile = File(...), \
-    api_key: str = Form(...), model: str = Form("gpt-4o"), summarize: bool = Form(False), suspicious: bool = Form(False), \
-    questions: bool = Form(False), speakers: bool = Form(False)):
+async def upload_audio(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    api_key: str = Form(...),
+    model: str = Form("gpt-4o"),
+    summarize: bool = Form(False),
+    summary_style: str = Form("short"),
+    suspicious: bool = Form(False),
+    questions: bool = Form(False),
+    speakers: bool = Form(False)
+):
     
     print(f"""
           OpenAI API key was provided: {api_key != "sk-..."}\n
           OpenAI model of choice: {model}\n
           OpenAI API tasks: \n
-          \tSummary: {summarize} \n
+          \tSummary: {summarize} ({summary_style})\n
           \tMark suspicious: {suspicious} \n
           \tGenerate questions: {questions} \n 
           \tSpeaker detection: {speakers}
@@ -70,13 +83,24 @@ async def upload_audio(background_tasks: BackgroundTasks, file: UploadFile = Fil
     
     file_id = str(uuid.uuid4())
     file_path = os.path.join(UPLOAD_FOLDER, file_id + ".mp3")
-    result_path = os.path.join(RESULTS_FOLDER)
+    result_path = os.path.join(RESULTS_FOLDER, file_id + ".mp3.txt")
     
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    background_tasks.add_task(transcribe_audio, file_path, result_path, DEVICE, api_key, model, \
-        summarize, suspicious, questions, speakers)
+    background_tasks.add_task(
+        transcribe_audio,
+        file_path,
+        result_path,
+        DEVICE,
+        api_key,
+        model,
+        summarize,
+        summary_style,
+        suspicious,
+        questions,
+        speakers
+    )
 
     return JSONResponse({"message": "File uploaded, processing started.", "file_id": file_id})
 
@@ -88,7 +112,7 @@ async def get_transcription(file_id: str):
     if not os.path.exists(result_path):
         return JSONResponse({"error": "Transcription not ready yet."}, status_code=404)
 
-    with open(result_path, "r") as f:
+    with open(result_path, "r", encoding="utf-8") as f:
         content = f.read()
 
     return JSONResponse({"transcription": content})

@@ -1,0 +1,38 @@
+{
+    "extensive_summary": [
+        "Du är en språkmodell som hjälper till att analysera och sammanfatta intervjuer med tillsynsobjekt inom arbetsmarknaden,",
+        "exempelvis Arbetsförmedlingen, arbetslöshetskassorna eller Försäkringskassan. Din uppgift är att skriva en tematiskt organiserad,",
+        "formell sammanfattning av intervjuutdraget nedan. Sammanfatta innehållet utan att citera direkt, men bevara nyanser och viktiga detaljer.",
+        "Dela upp texten i tydligt rubricerade sektioner (med rubriker i fet stil). Använd ett tydligt och myndighetsanpassat språk.",
+        "Inkludera både positiva erfarenheter, utmaningar och eventuella förbättringsförslag.",
+        "Formatet du ska svara i:",
+        "## Tema eller område (rubrik i fet stil)",
+        "- Kort, formell beskrivning av vad intervjupersonerna uttryckt.",
+        "- Inkludera relevant bakgrund eller resonemang där det förekommer.",
+        "- Fokusera på vad som fungerar, vad som varit svårt, och eventuella slutsatser eller önskemål som framförts.",
+        "Upprepa detta för varje tema som framgår av intervjun.",
+        "Avsluta inte med en sammanfattande slutsats – håll dig till ett rent tematiskt upplägg.",
+        "Här nedan följer transkriberingen:\\n"
+    ],
+    "suspicious_phrases": [
+        "I följande transkribering, identifiera och markera tveksamma eller osannolika ordkombinationer som kan bero",
+        "på fel i transkriberingen. Markera misstänkta fel genom att omsluta dem med markörerna [FEL?] och [/FEL?]:"
+    ],
+    "speaker_diarization": [
+        "Du får en rå, odelad transkribering av en intervju med en eller flera intervjuare",
+        "och en eller flera intervjuobjekt (t.ex. handläggare på en myndighet). Transkriberingen saknar talarangivelser.",
+        "Din uppgift är att:",
+        "1. Identifiera antal distinkta röster i texten, både intervjuare och intervjuobjekt.",
+        "2. Märka upp varje replik med en neutral beteckning som:",
+        "- Intervjuare 1, Intervjuare 2, osv.",
+        "- Intervjuobjekt 1, Intervjuobjekt 2, osv.",
+        "3. Om en person tydligt återkommer längre fram (t.ex. fortsätter prata), använd samma beteckning som tidigare.",
+        "4. Gör en tydlig radbrytning mellan varje replik, så att dialogen blir läsbar.",
+        "Du får inte hitta på namn. Skriv inget utanför själva dialogen.",
+        "Exempel på format:",
+        "Intervjuare 1: Kan du beskriva hur processen ser ut från att ett ärende kommer in?",
+        "Intervjuobjekt 1: Ja, först får vi ett meddelande..."
+    ],
+    "short_summary": "Sammanfatta följande transkribering på ett koncist sätt med fokus på huvudpunkterna:",
+    "follow_up_questions": "Baserat på följande transkribering, generera fem möjliga uppföljningsfrågor som en intervjuare skulle kunna ställa:"
+}

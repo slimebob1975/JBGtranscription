@@ -33,7 +33,11 @@
                 <option value="gpt-4-turbo">gpt-4-turbo</option>
                 <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
             </select><br><br>
-            <label><input type="checkbox" id="optSummary"> Generera sammanfattning</label><br>
+            <label><input type="checkbox" id="optSummary"> Generera sammanfattning</label>
+            <div id="summaryOptions" style="margin-left: 1rem; display: none;">
+                <label><input type="radio" name="summaryStyle" value="short" checked> Enkel</label>
+                <label><input type="radio" name="summaryStyle" value="extensive"> Utförlig</label>
+            </div><br>
             <label><input type="checkbox" id="optSuspicious"> Markera misstänkta fel i transkriberingen</label><br>
             <label><input type="checkbox" id="optQuestions"> Föreslå följdfrågor baserat på innehållet</label><br>
             <label><input type="checkbox" id="optSpeakers"> Identifiera olika talare baserat på innehåll (beta)</label>

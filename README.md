@@ -10,7 +10,7 @@
 
 - 🎙️ Upload `.mp3` audio files for transcription
 - 🧠 Optional AI enhancements via OpenAI:
-  - Generate **summaries**
+  - Generate **summaries** (select between _Enkel_ or _Utförlig_)
   - Flag **suspicious phrases**
   - Suggest **follow-up questions**
 - 🔑 Enter your own **OpenAI API key** in the browser — no key is stored or logged on the server
@@ -86,7 +86,7 @@ Then open your browser at:
 2. **Enter your OpenAI API key**
 3. **Choose model** (e.g. `gpt-4o`)
 4. **Select optional AI features:**
-   - ✔️ Summary
+   - ✔️ Summary: Choose between _Enkel_ (short) and _Utförlig_ (extensive) summaries
    - ✔️ Suspicious phrase detection
    - ✔️ Follow-up questions
    - ✔️ Speaker diarization (beta)
@@ -110,6 +110,28 @@ Each optional AI checkbox triggers a different OpenAI-powered feature:
 
 All results are included in the output `.txt`.
 
+## 🧠 Prompt Customization via `prompt_policy.json`
+
+All OpenAI-related prompts are stored centrally in:
+
+```plaintext
+/policy/prompt_policy.json
+```
+
+You can customize how summaries, suspicious phrase detection, and follow-up questions are phrased by editing this file.
+
+### Supported Prompt Keys:
+
+| Key                  | Used For                        |
+|----------------------|----------------------------------|
+| `short_summary`      | Short summary instructions       |
+| `extensive_summary`  | Detailed summary (multi-line)    |
+| `suspicious_phrases` | Detection of sensitive content   |
+| `follow_up_questions`| Suggesting relevant questions    |
+| `speaker_diarization`| (Optional) Speaker segmentation  |
+
+📂 The prompt file is loaded dynamically for each transcription, allowing easy experimentation and localization.
+
 > 💬 **Note:** This implementation is currently optimized for **Swedish transcriptions**.  
 > To support other languages, you can modify the `transcribe()` method in the `JBGtranscriber` class to set the desired transcription language and prompt instructions.
 
@@ -122,13 +144,13 @@ The `JBGtranscriber.py` script can be used independently of the web interface.
 ### Usage:
 
 ```bash
-python JBGtranscriber.py [input_path] [output_folder] [cpu|gpu] [openai_api_key] (optional: model)
+python JBGtranscriber.py [input_path] [output_folder] [cpu|gpu] [openai_api_key] (optional: model) (optional: summary_level)
 ```
 
 ### Example:
 
 ```bash
-python JBGtranscriber.py ./audio ./results cpu sk-xxxxxx gpt-4o
+python JBGtranscriber.py ./audio ./results cpu sk-xxxxxx gpt-4o extensive
 ```
 
 ### Features:

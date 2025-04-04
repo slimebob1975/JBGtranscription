@@ -17,28 +17,7 @@ class JBGtranscriber():
     # Standard Settings
     TRANSCRIBER_MODEL_ID = "KBLab/kb-whisper-large"
     CACHE_DIR = ".cache"
-    
-    OPENAI_MODEL = "gpt-4o" # Alternatives: gpt-4-turbo
-    
-    DIARIZE_PROMPT = f"""Du får en rå, odelad transkribering av en intervju med en eller flera intervjuare 
-            och en eller flera intervjuobjekt (t.ex. handläggare på en myndighet). Transkriberingen saknar talarangivelser.
-
-            Din uppgift är att:
-
-            1. Identifiera antal distinkta röster i texten, både intervjuare och intervjuobjekt.
-            2. Märka upp varje replik med en neutral beteckning som:
-            - Intervjuare 1, Intervjuare 2, osv.
-            - Intervjuobjekt 1, Intervjuobjekt 2, osv.
-            3. Om en person tydligt återkommer längre fram (t.ex. fortsätter prata), använd samma beteckning som tidigare.
-            4. Gör en tydlig radbrytning mellan varje replik, så att dialogen blir läsbar.
-
-            Du får inte hitta på namn. Skriv inget utanför själva dialogen.
-
-            Exempel på format:
-            Intervjuare 1: Kan du beskriva hur processen ser ut från att ett ärende kommer in?
-            Intervjuobjekt 1: Ja, först får vi ett meddelande...
-            """
-    
+        
     def __init__(self, 
                  convert_path,
                  export_path = Path("."),
@@ -48,8 +27,8 @@ class JBGtranscriber():
                  transcriber_model_id=TRANSCRIBER_MODEL_ID,
                  insert_linebreaks=False
                  ):
-        self.convert_path = convert_path
-        self.export_path = Path(str(export_path) + "\\" + os.path.basename(convert_path).split('/')[-1] + ".txt") 
+        self.convert_path = Path(convert_path)
+        self.export_path = Path(export_path)
         self.api_key = api_key
         self.openai_model = openai_model
         self.transcriber_model_id = transcriber_model_id
@@ -58,11 +37,20 @@ class JBGtranscriber():
         
         self.transcription = ""
         self.transcription_w_timestamps = ""
+        self.prompt_policy = self.load_prompt_policy()
         self.summary = ""
         self.marked_text = ""
         self.follow_up_questions = ""
         self.analyze_speakers = ""
 
+    def load_prompt_policy(self):
+        try:
+            with open("policy/prompt_policy.json", "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"[ERROR] Could not load prompt policy: {e}")
+            return {}
+    
     @staticmethod
     def do_nvidia_check(preferred_device):
         """"Check if we have GPU support or not and set data type accordingly """
@@ -152,24 +140,27 @@ class JBGtranscriber():
 
         return completion.choices[0].message
 
-    def generate_summary(self):
-        """Skapar en sammanfattning av transkriberingen."""
-        prompt = f"""Sammanfatta följande transkribering på ett koncist sätt med fokus på huvudpunkterna:
-        {self.transcription}"""
+    def generate_summary(self, style="short"):
         
-        try:
-            self.summary = self.call_openai_simple(prompt).content
-        except Exception as e:
-            print(f"An error occurred while generating the summary: {e}")
-            self.summary = "Sammanfattning var inte tillgängligt"
+        """Genererar en sammanfattning baserat på vald stil ('short' eller 'extensive')."""
+        if style == "extensive":
+            system_message = "\n".join(self.prompt_policy.get("extensive_summary", ["Sammanfatta detta:"]))
+        else:
+            system_message = self.prompt_policy.get("short_summary", "Sammanfatta detta:")
 
+        try:
+            self.summary = self.call_openai(
+                instructions=system_message,
+                input_message=self.transcription
+            ).content
+        except Exception as e:
+            print(f"[ERROR] Summary generation failed: {e}")
+            self.summary = "Sammanfattning var inte tillgänglig"
+            
     def find_suspicious_phrases(self):
         """Identifierar och markerar osannolika eller grammatiskt tveksamma ordkombinationer."""
-        prompt = f"""I följande transkribering, identifiera och markera tveksamma eller osannolika ordkombinationer 
-        som kan bero på fel i transkriberingen. Markera misstänkta fel genom att omsluta dem med markörerna [FEL?] och [/FEL?]:
-        {self.transcription}"""
-        
         try:
+            prompt = "\n".join(self.prompt_policy.get("suspicious_phrases", [])) + "\n" + self.transcription
             self.marked_text = self.call_openai_simple(prompt).content
         except Exception as e:
             print(f"An error occurred while finding suspicious phrases: {e}")
@@ -177,10 +168,8 @@ class JBGtranscriber():
 
     def suggest_follow_up_questions(self):
         """Föreslår fem relevanta uppföljningsfrågor baserat på transkriberingen."""
-        prompt = f"""Baserat på följande transkribering, generera fem möjliga uppföljningsfrågor som en intervjuare skulle kunna ställa:
-        {self.transcription}"""
-        
         try:
+            prompt = self.prompt_policy.get("follow_up_questions", "Generera uppföljningsfrågor:") + "\n" + self.transcription
             self.follow_up_questions = self.call_openai_simple(prompt).content
         except Exception as e:
             print(f"An error occurred while generating follow-up questions: {e}")
@@ -189,10 +178,11 @@ class JBGtranscriber():
     def do_analyze_speakers(self):
         """Analysera transkriberingen med avseende på vilka talare som säger vad"""
         
-        prompt = JBGtranscriber.DIARIZE_PROMPT
+        prompt = "\n".join(self.prompt_policy.get("speaker_diarization", [
+            "Försök att identifiera olika röster i följande transkribering:"
+        ]))
+        
         input_message = f"""
-
-            Här är transkriberingen: 
             ------------------------
             {self.transcription}
             ------------------------
@@ -211,7 +201,7 @@ class JBGtranscriber():
         OVERLAP_TOKENS = 300
         
         # Setup encoder for model
-        enc = tiktoken.encoding_for_model(JBGtranscriber.OPENAI_MODEL)
+        enc = tiktoken.encoding_for_model(self.openai_model)
         
         # Some internal help functions
         def _tokenize(text, enc):
@@ -239,7 +229,9 @@ class JBGtranscriber():
         else:
             # Text resulted in multiple segments
             diarized_segments = []
-            prompt = JBGtranscriber.DIARIZE_PROMPT
+            prompt = "\n".join(self.prompt_policy.get("speaker_diarization", [
+                "Försök att identifiera olika röster i följande transkribering:"
+            ]))
 
             try:
                 for i, segment in enumerate(segments):
@@ -304,7 +296,7 @@ class JBGtranscriber():
         """Write final result to the output file"""
         
         try:
-            with open(self.export_path, "w") as export_file:
+            with open(self.export_path, "w", encoding="utf-8") as export_file:
                 export_file.write("### Rå transkribering:\n" + self.transcription + "\n\n")
                 export_file.write("### Transkribering med tidsstämplar:\n" + self.transcription_w_timestamps + "\n\n")
                 if self.summary:
@@ -319,8 +311,14 @@ class JBGtranscriber():
         except Exception as ex:
             print(f"Something went wrong on writing transcription results to the file {self.export_path}: {str(ex)}")
             
-    def perform_transcription_steps(self, generate_summary=False, find_suspicious_phrases=False,\
-        suggest_follow_up_questions=False, analyze_speakers=False):
+    def perform_transcription_steps(
+        self,
+        generate_summary=False,
+        summary_style="short",
+        find_suspicious_phrases=False,
+        suggest_follow_up_questions=False,
+        analyze_speakers=False
+    ):
         """Perform all transcription steps"""
         
         # Transcribe the audio files
@@ -329,7 +327,7 @@ class JBGtranscriber():
         # Generate a summary if requested
         if generate_summary:
             print("Generating summary")
-            self.generate_summary()
+            self.generate_summary(style=summary_style)
             print("Summary generated successfully.")
         
         # Find and mark suspicious phrases if requested
@@ -359,7 +357,7 @@ class JBGtranscriber():
 
 def check_script_arguments():
     """Check command-line arguments for the test script""" 
-    if len(sys.argv) < 5:
+    if len(sys.argv) < 6:
         sys.exit("Usage: " + sys.argv[0] + " [path to .mp3 file or folder] [output folder] [device=gpu/cpu] [openai_api_key] (optional: model)")
 
     convert_path = Path(sys.argv[1])
@@ -367,6 +365,7 @@ def check_script_arguments():
     device = sys.argv[3].lower()
     api_key = sys.argv[4]
     model = sys.argv[5] if len(sys.argv) > 5 else "gpt-4o"
+    summary_style = sys.argv[6] if len(sys.argv) > 6 else "short"
 
     if not convert_path.exists():
         sys.exit(f"{convert_path} is not a valid file or directory path")
@@ -374,13 +373,15 @@ def check_script_arguments():
         sys.exit(f"{export_path} is not a valid directory path")
     if device not in ["cpu", "gpu"]:
         sys.exit("Device must be 'cpu' or 'gpu'")
+    if summary_style not in ["short", "extensive"]:
+        sys.exit("Summary style must be 'short' or 'extensive'")
 
-    return convert_path, export_path, device, api_key, model
+    return convert_path, export_path, device, api_key, model, summary_style
 
 
 def main():
     # Parse arguments
-    convert_path, export_path, device, api_key, model = check_script_arguments()
+    convert_path, export_path, device, api_key, model, summary_style = check_script_arguments()
 
     # Gather files to process
     if convert_path.is_dir():
@@ -402,7 +403,8 @@ def main():
 
         # Run all steps
         transcriber.perform_transcription_steps(
-            generate_summary=True,
+            generate_summary=True,,
+            summary_style=summary_style,
             find_suspicious_phrases=True,
             suggest_follow_up_questions=True,
             analyze_speakers=True
