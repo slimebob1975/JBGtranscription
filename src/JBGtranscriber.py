@@ -190,25 +190,29 @@ class JBGtranscriber():
                 print(f"[INFO] Summarizing segment {i+1}/{len(segments)}...")
                 context_note = f"(Detta är del {i+1} av transkriptionen. Sammanfatta detta avsnitt noggrant.)"
                 result = self.call_openai(instructions=instructions, input_message=context_note + "\n\n" + segment)
-                partial_summaries.append(f"### Sammanfattning av segment {i+1}:\n{result.content.strip()}")
+                partial_summaries.append(f"### Sammanfattning av del {i+1}:\n{result.content.strip()}")
         except Exception as e:
             print(f"[ERROR] Failed to summarize segment: {e}")
             self.summary = "Sammanfattning misslyckades"
             return
 
-        # Optional: Merge partial summaries with a second OpenAI pass
-        combined = "\n\n".join(partial_summaries)
-        print("[INFO] Merging partial summaries into final summary...")
+        # Step 1: Seamless compilation
+        compiled_summary = "\n\n".join(partial_summaries)
 
+        # Step 2: Generate short wrap-up summary
+        print("[INFO] Generating short summary as concluding wrap-up...")
         try:
-            merge_prompt = "\n".join(self.prompt_policy.get("merge_summary", [
-                "Sammanfatta och strukturera följande delar till en övergripande temabaserad sammanfattning."
-            ]))
-            result = self.call_openai(instructions=merge_prompt, input_message=combined)
-            self.summary = result.content.strip()
+            short_prompt = "\n".join(self.prompt_policy.get("short_summary", ["Sammanfatta detta:"]))
+            final_wrapup = self.call_openai(
+                instructions=short_prompt,
+                input_message=compiled_summary
+            ).content.strip()
         except Exception as e:
-            print(f"[WARN] Merge step failed: {e}. Fallback: using raw segment summaries.")
-            self.summary = combined
+            print(f"[WARN] Short summary step failed: {e}")
+            final_wrapup = "Kort sammanfattning kunde inte genereras."
+
+        # Final result: seamless segments + wrap-up
+        self.summary = compiled_summary + "\n\n### Kort sammanfattning:\n" + final_wrapup
 
     def find_suspicious_phrases(self):
         """Identifierar och markerar osannolika eller grammatiskt tveksamma ordkombinationer."""
