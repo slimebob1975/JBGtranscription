@@ -42,5 +42,17 @@
         "Intervjuobjekt 1: Ja, först får vi ett meddelande..."
     ],
     "short_summary": "Sammanfatta följande transkribering på ett koncist sätt med fokus på huvudpunkterna:",
-    "follow_up_questions": "Baserat på följande transkribering, generera fem möjliga uppföljningsfrågor som en intervjuare skulle kunna ställa:"
+    "follow_up_questions": "Baserat på följande transkribering, generera fem möjliga uppföljningsfrågor som en intervjuare skulle kunna ställa:",
+    "merge_summary": [
+        "Du kommer att få flera delsammanfattningar, var och en beskriver ett segment från en längre transkription.",
+        "Sammanfoga inte innehållet till en ny förkortad sammanfattning.",
+        "Din uppgift är istället att organisera om materialet tematiskt så att mängden information inte minskar.",
+        "Använd gemensamma, tydliga rubriker.",
+        "Behåll så mycket som möjligt av de ursprungliga formuleringarna och/eller citaten från segmenten.",
+        "Slå ihop liknande information utan att utelämna nyanser eller perspektiv.",
+        "Rubrikerna ska spegla innehållet och hjälpa läsaren att förstå vilka teman som förekommer.",
+        "Fokus ligger på att bevara detaljer, variation i uttryck och att samla likartat material tillsammans.",
+        "Behåll det språk som finns i det ursprungliga materialet.",
+        "Avsluta med en utförlig övergripande sammanfattning i slutet."
+    ]
 }

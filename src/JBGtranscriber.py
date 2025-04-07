@@ -14,6 +14,10 @@ except ModuleNotFoundError as ex:
     
 CACHE_TRANSCRIPTION_MARKER = "===TRANSCRIPTION==="
 CACHE_TIMESTAMPED_MARKER = "===TIMESTAMPED==="
+
+ # Max tokens per segment (input + output < 8000 tokens)
+MAX_INPUT_TOKENS = 3500
+OVERLAP_TOKENS = 300
     
 class JBGtranscriber():
     
@@ -154,19 +158,58 @@ class JBGtranscriber():
         
         """Genererar en sammanfattning baserat på vald stil ('short' eller 'extensive')."""
         if style == "extensive":
-            system_message = "\n".join(self.prompt_policy.get("extensive_summary", ["Sammanfatta detta:"]))
+            self.generate_summary_splitted()
         else:
             system_message = self.prompt_policy.get("short_summary", "Sammanfatta detta:")
+            try:
+                self.summary = self.call_openai(
+                    instructions=system_message,
+                    input_message=self.transcription
+                ).content
+            except Exception as e:
+                print(f"[ERROR] Summary generation failed: {e}")
+                self.summary = "Sammanfattning var inte tillgänglig"
+                
+    def generate_summary_splitted(self):
+
+        print("[INFO] Starting segmented summary generation...")
+
+        enc = tiktoken.encoding_for_model(self.openai_model)
+
+        segments = self._split_into_segments(self.transcription, enc)
+
+        prompt_lines = self.prompt_policy.get("extensive_summary", ["Sammanfatta detta:"])
+        instructions = "\n".join(prompt_lines)
+
+        partial_summaries = []
 
         try:
-            self.summary = self.call_openai(
-                instructions=system_message,
-                input_message=self.transcription
-            ).content
+            for i, segment in enumerate(segments):
+                if i > 0:
+                    time.sleep(5)  # prevent hitting rate limits
+                print(f"[INFO] Summarizing segment {i+1}/{len(segments)}...")
+                context_note = f"(Detta är del {i+1} av transkriptionen. Sammanfatta detta avsnitt noggrant.)"
+                result = self.call_openai(instructions=instructions, input_message=context_note + "\n\n" + segment)
+                partial_summaries.append(f"### Sammanfattning av segment {i+1}:\n{result.content.strip()}")
         except Exception as e:
-            print(f"[ERROR] Summary generation failed: {e}")
-            self.summary = "Sammanfattning var inte tillgänglig"
-            
+            print(f"[ERROR] Failed to summarize segment: {e}")
+            self.summary = "Sammanfattning misslyckades"
+            return
+
+        # Optional: Merge partial summaries with a second OpenAI pass
+        combined = "\n\n".join(partial_summaries)
+        print("[INFO] Merging partial summaries into final summary...")
+
+        try:
+            merge_prompt = "\n".join(self.prompt_policy.get("merge_summary", [
+                "Sammanfatta och strukturera följande delar till en övergripande temabaserad sammanfattning."
+            ]))
+            result = self.call_openai(instructions=merge_prompt, input_message=combined)
+            self.summary = result.content.strip()
+        except Exception as e:
+            print(f"[WARN] Merge step failed: {e}. Fallback: using raw segment summaries.")
+            self.summary = combined
+
     def find_suspicious_phrases(self):
         """Identifierar och markerar osannolika eller grammatiskt tveksamma ordkombinationer."""
         try:
@@ -206,32 +249,10 @@ class JBGtranscriber():
 
     def do_analyze_speakers_splitted(self):
         
-        # Max tokens per segment (input + output bör hållas < 8000 tokens)
-        MAX_INPUT_TOKENS = 3500
-        OVERLAP_TOKENS = 300
-        
         # Setup encoder for model
         enc = tiktoken.encoding_for_model(self.openai_model)
         
-        # Some internal help functions
-        def _tokenize(text, enc):
-            return enc.encode(text)
-
-        def _detokenize(tokens, enc):
-            return enc.decode(tokens)
-        
-        def _split_into_segments(text, enc, max_tokens=MAX_INPUT_TOKENS, overlap=OVERLAP_TOKENS):
-            tokens = _tokenize(text, enc)
-            segments = []
-            i = 0
-            while i < len(tokens):
-                segment = tokens[i:i + max_tokens]
-                segments.append(_detokenize(segment, enc))
-                i += max_tokens - overlap
-            print(f"Text has {len(tokens)} tokens and results in {len(segments)} segments")
-            return segments
-        
-        segments = _split_into_segments(self.transcription, enc)
+        segments = self._split_into_segments(self.transcription, enc)
         
         # No need to split text into segments
         if len(segments) == 1:
@@ -256,6 +277,23 @@ class JBGtranscriber():
                 print(f"An error occurred while analyzing speakers: {e}")
                 self.analyze_speakers = "Försöket till identifiering av talare misslyckades"
              
+    # Some internal help functions
+    def _tokenize(self, text, enc):
+        return enc.encode(text)
+
+    def _detokenize(self, tokens, enc):
+        return enc.decode(tokens)
+    
+    def _split_into_segments(self, text, enc, max_tokens=MAX_INPUT_TOKENS, overlap=OVERLAP_TOKENS):
+        tokens = self._tokenize(text, enc)
+        segments = []
+        i = 0
+        while i < len(tokens):
+            segment = tokens[i:i + max_tokens]
+            segments.append(self._detokenize(segment, enc))
+            i += max_tokens - overlap
+        print(f"Text has {len(tokens)} tokens and results in {len(segments)} segments")
+        return segments
     
     def transcribe(self):
         """Put together the model of choice and do the transcription"""
