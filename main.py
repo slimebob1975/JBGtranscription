@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, BackgroundTasks, Form
+from fastapi import FastAPI, File, UploadFile, BackgroundTasks, Form, Request
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 import os
@@ -56,6 +56,13 @@ def clean_up_files(audio_file_path: Path, transcriptions_path: Path):
     old_transcripts = sorted([file for file in transcriptions_path.glob("*.mp3.txt")], key=lambda x: x.stat().st_ctime)[:-1]
     for file in old_transcripts:
         Path.unlink(file)
+
+# To find and log the current user
+@app.get("/me")
+def get_user(request: Request):
+    user = request.headers.get("X-MS-CLIENT-PRINCIPAL-NAME", "okänd användare")
+    print(f"[INFO] Användare inloggad: {user}")
+    return {"user": user}
 
 # Entry point for uploading audio files
 @app.post("/upload/")

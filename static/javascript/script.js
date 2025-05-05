@@ -27,6 +27,19 @@ document.addEventListener("DOMContentLoaded", () => {
         summaryOptions.style.display = show ? "block" : "none";
         document.querySelectorAll('input[name="summaryStyle"]').forEach(rb => rb.disabled = !show);
     });
+
+    // Show currently logged-in Azure AD user (if available)
+    fetch("/me")
+    .then(res => res.json())
+    .then(data => {
+        const userLabel = document.getElementById("userDisplay");
+        if (data.user && userLabel) {
+            userLabel.textContent = `Inloggad som: ${data.user}`;
+        }
+    })
+    .catch(err => {
+        console.warn("Kunde inte hämta användarinformation:", err);
+    });
 });
 
 // ✅ Upload handler
