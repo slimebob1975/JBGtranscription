@@ -1,7 +1,10 @@
 fastapi
 uvicorn[standard]
-gunicorn
-python-multipart
-aiofiles
 openai
-httpx
+whisper
+torch
+ffmpeg-python
+tiktoken
+python-multipart
+python-dotenv
+docx
