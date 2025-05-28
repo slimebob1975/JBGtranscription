@@ -11,6 +11,7 @@ try:
     import time
 except ModuleNotFoundError as ex:
     sys.exit("You probably need to install some missing modules:" + str(ex))
+from src.logging_config import logger
     
 CACHE_TRANSCRIPTION_MARKER = "===TRANSCRIPTION==="
 CACHE_TIMESTAMPED_MARKER = "===TIMESTAMPED==="
@@ -55,7 +56,7 @@ class JBGtranscriber():
             with open("policy/prompt_policy.json", "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
-            print(f"[ERROR] Could not load prompt policy: {e}")
+            logger.error(f" Could not load prompt policy: {e}")
             return {}
     
     @staticmethod
@@ -167,12 +168,12 @@ class JBGtranscriber():
                     input_message=self.transcription
                 ).content
             except Exception as e:
-                print(f"[ERROR] Summary generation failed: {e}")
+                logger.error(f" Summary generation failed: {e}")
                 self.summary = "Sammanfattning var inte tillgänglig"
                 
     def generate_summary_splitted(self):
 
-        print("[INFO] Starting segmented summary generation...")
+        logger.info(f"[INFO] Starting segmented summary generation...")
 
         enc = tiktoken.encoding_for_model(self.openai_model)
 
@@ -187,12 +188,12 @@ class JBGtranscriber():
             for i, segment in enumerate(segments):
                 if i > 0:
                     time.sleep(5)  # prevent hitting rate limits
-                print(f"[INFO] Summarizing segment {i+1}/{len(segments)}...")
+                logger.info(f" Summarizing segment {i+1}/{len(segments)}...")
                 context_note = f"(Detta är del {i+1} av transkriptionen. Sammanfatta detta avsnitt noggrant.)"
                 result = self.call_openai(instructions=instructions, input_message=context_note + "\n\n" + segment)
                 partial_summaries.append(f"### Sammanfattning av del {i+1}:\n{result.content.strip()}")
         except Exception as e:
-            print(f"[ERROR] Failed to summarize segment: {e}")
+            logger.error(f" Failed to summarize segment: {e}")
             self.summary = "Sammanfattning misslyckades"
             return
 
@@ -200,7 +201,7 @@ class JBGtranscriber():
         compiled_summary = "\n\n".join(partial_summaries)
 
         # Step 2: Generate short wrap-up summary
-        print("[INFO] Generating short summary as concluding wrap-up...")
+        logger.info(f"[INFO] Generating short summary as concluding wrap-up...")
         try:
             short_prompt = "\n".join(self.prompt_policy.get("short_summary", ["Sammanfatta detta:"]))
             final_wrapup = self.call_openai(
@@ -208,7 +209,7 @@ class JBGtranscriber():
                 input_message=compiled_summary
             ).content.strip()
         except Exception as e:
-            print(f"[WARN] Short summary step failed: {e}")
+            logger.warning(f" Short summary step failed: {e}")
             final_wrapup = "Kort sammanfattning kunde inte genereras."
 
         # Final result: seamless segments + wrap-up
@@ -220,7 +221,7 @@ class JBGtranscriber():
             prompt = "\n".join(self.prompt_policy.get("suspicious_phrases", [])) + "\n" + self.transcription
             self.marked_text = self.call_openai_simple(prompt).content
         except Exception as e:
-            print(f"An error occurred while finding suspicious phrases: {e}")
+            logger.error(f"An error occurred while finding suspicious phrases: {e}")
             self.marked_text = "Markering av misstänkta fel i texten misslyckades"
 
     def suggest_follow_up_questions(self):
@@ -229,7 +230,7 @@ class JBGtranscriber():
             prompt = self.prompt_policy.get("follow_up_questions", "Generera uppföljningsfrågor:") + "\n" + self.transcription
             self.follow_up_questions = self.call_openai_simple(prompt).content
         except Exception as e:
-            print(f"An error occurred while generating follow-up questions: {e}")
+            logger.error(f"An error occurred while generating follow-up questions: {e}")
             self.follow_up_questions = "Förslag till uppföljande frågor misslyckades"
             
     def do_analyze_speakers(self):
@@ -248,7 +249,7 @@ class JBGtranscriber():
         try:
             self.analyze_speakers = self.call_openai(instructions=prompt, input_message=input_message).content
         except Exception as e:
-            print(f"An error occurred while analyzing speakers: {e}")
+            logger.error(f"An error occurred while analyzing speakers: {e}")
             self.analyze_speakers = "Försöket till identifiering av talare misslyckades"
 
     def do_analyze_speakers_splitted(self):
@@ -272,13 +273,13 @@ class JBGtranscriber():
                 for i, segment in enumerate(segments):
                     if i>0: 
                         time.sleep(5)  # undvik rate limit for multiple API calls
-                    print(f"Bearbetar segment {i+1}/{len(segments)}...")
+                    logger.info(f"Bearbetar segment {i+1}/{len(segments)}...")
                     context = f"\nDetta är del {i+1}. Fortsätt numrera talare konsekvent.\n"
                     diarized = self.call_openai(instructions=prompt+context, input_message=segment).content
                     diarized_segments.append(diarized)
                 self.analyze_speakers = ("\n\n".join(diarized_segments))
             except Exception as e:
-                print(f"An error occurred while analyzing speakers: {e}")
+                logger.error(f"An error occurred while analyzing speakers: {e}")
                 self.analyze_speakers = "Försöket till identifiering av talare misslyckades"
              
     # Some internal help functions
@@ -296,7 +297,7 @@ class JBGtranscriber():
             segment = tokens[i:i + max_tokens]
             segments.append(self._detokenize(segment, enc))
             i += max_tokens - overlap
-        print(f"Text has {len(tokens)} tokens and results in {len(segments)} segments")
+        logger.info(f"Text has {len(tokens)} tokens and results in {len(segments)} segments")
         return segments
     
     def transcribe(self):
@@ -308,7 +309,7 @@ class JBGtranscriber():
         # Check cache
         cache_file = self.get_transcription_cache_path()
         if cache_file.exists():
-            print(f"[INFO] Using cached transcription: {cache_file.name}")
+            logger.info(f" Using cached transcription: {cache_file.name}")
             with open(cache_file, "r", encoding="utf-8") as f:
                 content = f.read()
                 parts = content.split(CACHE_TIMESTAMPED_MARKER)
@@ -349,7 +350,7 @@ class JBGtranscriber():
             f.write(f"\n{CACHE_TIMESTAMPED_MARKER}\n")
             f.write(self.transcription_w_timestamps)
         
-        print(f"[INFO] Transcription and timestamps cached as: {cache_file.name}")
+        logger.info(f" Transcription and timestamps cached as: {cache_file.name}")
 
     def _postprocess_result(self, result):
         """Post process result of call to transcription model"""
@@ -383,7 +384,7 @@ class JBGtranscriber():
                     export_file.write("### Försök till identifiering av olika talare:\n" + self.analyze_speakers + "\n")
                     
         except Exception as ex:
-            print(f"Something went wrong on writing transcription results to the file {self.export_path}: {str(ex)}")
+            logger.info(f"Something went wrong on writing transcription results to the file {self.export_path}: {str(ex)}")
             
     def perform_transcription_steps(
         self,
@@ -400,31 +401,31 @@ class JBGtranscriber():
         
         # Generate a summary if requested
         if generate_summary:
-            print("Generating summary")
+            logger.info(f"Generating summary")
             self.generate_summary(style=summary_style)
-            print("Summary generated successfully.")
+            logger.info(f"Summary generated successfully.")
         
         # Find and mark suspicious phrases if requested
         if find_suspicious_phrases:
-            print("Finding suspicious phrases")
+            logger.info(f"Finding suspicious phrases")
             self.find_suspicious_phrases()
-            print("Suspicious phrases found successfully.")
+            logger.info(f"Suspicious phrases found successfully.")
         
         # Suggest follow-up questions if requested
         if suggest_follow_up_questions:
-            print("Suggesting follow-up questions")
+            logger.info(f"Suggesting follow-up questions")
             self.suggest_follow_up_questions()
-            print("Follow-up questions suggested successfully.")
+            logger.info(f"Follow-up questions suggested successfully.")
             
         # Analyze speakers if requested
         if analyze_speakers:
-            print("Analyzing speakers")
+            logger.info(f"Analyzing speakers")
             #self.do_analyze_speakers()
             self.do_analyze_speakers_splitted()
-            print("Speakers analyzed successfully.")
+            logger.info(f"Speakers analyzed successfully.")
         
         # Print a message confirming successful completion
-        print("All transcription steps completed successfully.")
+        logger.info(f"All transcription steps completed successfully.")
             
         # Write the transcription results to an output file
         self.write_to_output_file()
@@ -464,7 +465,7 @@ def main():
         convert_files = [convert_path]
 
     for convert_file in convert_files:
-        print(f"Processing {convert_file.name}...")
+        logger.info(f"Processing {convert_file.name}...")
 
         # Instantiate transcriber with all required params
         transcriber = JBGtranscriber(

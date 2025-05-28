@@ -8,13 +8,14 @@ import uuid
 import src.JBGtranscriber as JBGtranscriber
 from pathlib import Path
 import torch
+from src.logging_config import logger
 
 from fastapi import FastAPI
 
 try:
     app = FastAPI()
 except Exception as e:
-    print("FastAPI ERROR:", e, file=sys.stderr)
+    logger.error(f"FastAPI ERROR:", e, file=sys.stderr)
     raise
 
 UPLOAD_FOLDER = "uploads"
@@ -61,7 +62,7 @@ def clean_up_files(audio_file_path: Path, transcriptions_path: Path):
 @app.get("/me")
 def get_user(request: Request):
     user = request.headers.get("X-MS-CLIENT-PRINCIPAL-NAME", "okänd användare")
-    print(f"[INFO] Användare inloggad: {user}")
+    logger.info(f" Användare inloggad: {user}")
     return {"user": user}
 
 # Entry point for uploading audio files
@@ -78,7 +79,7 @@ async def upload_audio(
     speakers: bool = Form(False)
 ):
     
-    print(f"""
+    logger.info(f"""
           OpenAI API key was provided: {api_key != "sk-..."}\n
           OpenAI model of choice: {model}\n
           OpenAI API tasks: \n
