@@ -11,7 +11,7 @@ try:
     import time
 except ModuleNotFoundError as ex:
     sys.exit("You probably need to install some missing modules:" + str(ex))
-from src.logging_config import logger
+from src.JBGLogger import JBGLogger
     
 CACHE_TRANSCRIPTION_MARKER = "===TRANSCRIPTION==="
 CACHE_TIMESTAMPED_MARKER = "===TIMESTAMPED==="
@@ -19,6 +19,8 @@ CACHE_TIMESTAMPED_MARKER = "===TIMESTAMPED==="
  # Max tokens per segment (input + output < 8000 tokens)
 MAX_INPUT_TOKENS = 3500
 OVERLAP_TOKENS = 300
+
+logger = JBGLogger(level="INFO").logger
     
 class JBGtranscriber():
     

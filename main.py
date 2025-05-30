@@ -8,9 +8,11 @@ import uuid
 import src.JBGtranscriber as JBGtranscriber
 from pathlib import Path
 import torch
-from src.logging_config import logger
+from src.JBGLogger import JBGLogger
 
 from fastapi import FastAPI
+
+logger = JBGLogger(level="INFO").logger
 
 try:
     app = FastAPI()
