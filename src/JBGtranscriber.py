@@ -9,6 +9,7 @@ try:
     import json
     import tiktoken
     import time
+    import psutil
 except ModuleNotFoundError as ex:
     sys.exit("You probably need to install some missing modules:" + str(ex))
 from src.JBGLogger import JBGLogger
@@ -32,6 +33,13 @@ class JBGtranscriber():
     "KBLab/kb-whisper-base",
     "KBLab/kb-whisper-tiny"
     ]
+    TRANSCRIBER_MODEL_RAM_REQUIREMENTS = {
+    "KBLab/kb-whisper-large": 6.0,
+    "KBLab/kb-whisper-medium": 4.0,
+    "KBLab/kb-whisper-small": 2.5,
+    "KBLab/kb-whisper-base": 2.0,
+    "KBLab/kb-whisper-tiny": 1.5,
+    }
     TRANSCRIBER_MODEL_DEFAULT = TRANSCRIBER_MODEL_CANDIDATES[0]
     CACHE_DIR = "kb-whisper-cache"
         
@@ -360,7 +368,12 @@ class JBGtranscriber():
             f.write(self.transcription_w_timestamps)
         
         logger.info(f" Transcription and timestamps cached as: {cache_file.name}")
-        
+    
+    @staticmethod
+    def _enough_memory(min_gb_required: float = 6.0) -> bool:
+        available_gb = psutil.virtual_memory().available / (1024 ** 3)
+        return available_gb >= min_gb_required    
+    
     def transcribe(self):
         """Put together the model of choice and do the transcription"""
     
@@ -382,6 +395,16 @@ class JBGtranscriber():
         for model_id in self.TRANSCRIBER_MODEL_CANDIDATES:
             try:
                 logger.info(f"Trying model: {model_id}")
+                
+                # First check if the RAM will fit the model in question
+                required_ram_gb = self.TRANSCRIBER_MODEL_RAM_REQUIREMENTS.get(model_id, None)
+                if not required_ram_gb or not self._enough_memory(required_ram_gb):
+                    logger.warning(f"Skipping model {model_id} -- it is estimated that the available RAM is not enough.")
+                    continue
+                else:
+                    logger.info(f"Estimated RAM requirement for model {model_id}: {required_ram_gb} GB")
+                
+                # Move on an set up the model
                 model = AutoModelForSpeechSeq2Seq.from_pretrained(
                     model_id, torch_dtype=self.torch_dtype, use_safetensors=True, cache_dir=JBGtranscriber.CACHE_DIR
                 )
