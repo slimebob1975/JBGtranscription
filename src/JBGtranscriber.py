@@ -379,7 +379,7 @@ class JBGtranscriber():
             return
     
         # What model to use is decided dynamically
-        for model_id in self.TRANSCRIBER_MODEL_CANDIDATES:
+        for model_id in self.TRANSCRIBER_MODEL_CANDIDATES[4:]:
             try:
                 logger.info(f"Trying model: {model_id}")
                 model = AutoModelForSpeechSeq2Seq.from_pretrained(
