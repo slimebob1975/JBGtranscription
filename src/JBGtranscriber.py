@@ -25,7 +25,14 @@ logger = JBGLogger(level="INFO").logger
 class JBGtranscriber():
     
     # Standard Settings
-    TRANSCRIBER_MODEL_ID = "KBLab/kb-whisper-large"
+    TRANSCRIBER_MODEL_CANDIDATES = [
+    "KBLab/kb-whisper-large",
+    "KBLab/kb-whisper-medium",
+    "KBLab/kb-whisper-small",
+    "KBLab/kb-whisper-base",
+    "KBLab/kb-whisper-tiny"
+    ]
+    TRANSCRIBER_MODEL_DEFAULT = TRANSCRIBER_MODEL_CANDIDATES[0]
     CACHE_DIR = "kb-whisper-cache"
         
     def __init__(self, 
@@ -34,7 +41,7 @@ class JBGtranscriber():
                  device = "cpu",
                  api_key = None,
                  openai_model = "gpt-4o",
-                 transcriber_model_id=TRANSCRIBER_MODEL_ID,
+                 transcriber_model_id=TRANSCRIBER_MODEL_DEFAULT,
                  insert_linebreaks=False
                  ):
         self.convert_path = Path(convert_path)
@@ -302,7 +309,7 @@ class JBGtranscriber():
         logger.info(f"Text has {len(tokens)} tokens and results in {len(segments)} segments")
         return segments
     
-    def transcribe(self):
+    def transcribe_default(self):
         """Put together the model of choice and do the transcription"""
     
         # Ensure cache directory exists
@@ -353,6 +360,81 @@ class JBGtranscriber():
             f.write(self.transcription_w_timestamps)
         
         logger.info(f" Transcription and timestamps cached as: {cache_file.name}")
+        
+    def transcribe(self):
+        """Put together the model of choice and do the transcription"""
+    
+        # Ensure cache directory exists
+        Path("cache").mkdir(exist_ok=True)
+
+        # Check cache
+        cache_file = self.get_transcription_cache_path()
+        if cache_file.exists():
+            logger.info(f" Using cached transcription: {cache_file.name}")
+            with open(cache_file, "r", encoding="utf-8") as f:
+                content = f.read()
+                parts = content.split(CACHE_TIMESTAMPED_MARKER)
+                self.transcription = parts[0].replace(CACHE_TRANSCRIPTION_MARKER, "").strip()
+                self.transcription_w_timestamps = parts[1].strip() if len(parts) > 1 else ""
+            return
+    
+        # What model to use is decided dynamically
+        for model_id in self.TRANSCRIBER_MODEL_CANDIDATES:
+            try:
+                logger.info(f"Trying model: {model_id}")
+                model = AutoModelForSpeechSeq2Seq.from_pretrained(
+                    model_id, torch_dtype=self.torch_dtype, use_safetensors=True, cache_dir=JBGtranscriber.CACHE_DIR
+                )
+                model.to(self.device)
+                processor = AutoProcessor.from_pretrained(model_id)
+
+                # Define pipeline
+                pipe = pipeline(
+                    "automatic-speech-recognition",
+                    model=model,
+                    tokenizer=processor.tokenizer,
+                    feature_extractor=processor.feature_extractor,
+                    torch_dtype=self.torch_dtype,
+                    device=self.device,
+                )
+
+                generate_kwargs = {"task": "transcribe", "language": "sv"}
+
+                # Do transcription
+                result = pipe(str(self.convert_path), 
+                        chunk_length_s=30,
+                        generate_kwargs=generate_kwargs, 
+                        return_timestamps=True)
+                
+                self.transcription, self.transcription_w_timestamps = self._postprocess_result(result)
+                
+                logger.info(f" Transcription successful with model: {model_id}")
+                
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    f.write(f"{CACHE_TRANSCRIPTION_MARKER}\n")
+                    f.write(self.transcription + "\n")
+                    f.write(f"\n{CACHE_TIMESTAMPED_MARKER}\n")
+                    f.write(self.transcription_w_timestamps)
+                
+                logger.info(f" Transcription and timestamps cached as: {cache_file.name}")
+                return  # success
+            
+            except RuntimeError as e:
+                if "out of memory" in str(e).lower():
+                    logger.warning(f"Model {model_id} failed due to Runtime memory error: {str(e)}. Trying next model...")
+                    torch.cuda.empty_cache()
+                    continue
+                else:
+                    logger.error(f"Transcription failed with model {model_id}: {e}")
+                    raise e
+            except MemoryError as e:
+                logger.warning(f"Model {model_id} failed due to Python memory error: {str(e)}. Trying next model...")
+            except Exception as e:
+                logger.error(f"Unexpected error with model {model_id}: {e}")
+                raise e
+        
+        # If none succeed we are really in trouble
+        raise RuntimeError("All model options failed. Try reducing file size or increasing memory.")
 
     def _postprocess_result(self, result):
         """Post process result of call to transcription model"""
