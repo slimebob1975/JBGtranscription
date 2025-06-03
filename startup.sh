@@ -3,8 +3,8 @@
 # Installera ffmpeg om det saknas
 echo "[INFO] Checking for ffmpeg..."
 ffmpeg -version || echo "[INFO] ffmpeg not found, installing..."
-sudo apt-get update
-sudo apt-get install -y ffmpeg
+apt-get update
+apt-get install -y ffmpeg
 echo "[INFO] Installed version:"
 ffmpeg -version
 
