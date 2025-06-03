@@ -85,4 +85,4 @@ jobs:
         id: deploy-to-webapp
         with:
           app-name: 'iaf-transcript-lab'
-          slot-name: 'Development'
+          slot-name: 'Production'
