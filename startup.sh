@@ -1,5 +1,13 @@
 #!/bin/bash
 
+# Installera ffmpeg om det saknas
+echo "[INFO] Checking for ffmpeg..."
+ffmpeg -version || echo "[INFO] ffmpeg not found, installing..."
+apt-get update
+apt-get install -y ffmpeg
+echo "[INFO] Installed version:"
+ffmpeg -version
+
 # Installera Whisper-modellen i fallback om inte cache finns (valfritt)
 echo "[INFO] Starting JBGtranscription API via Gunicorn"
 
