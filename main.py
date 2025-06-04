@@ -9,6 +9,7 @@ import src.JBGtranscriber as JBGtranscriber
 from pathlib import Path
 import torch
 from src.JBGLogger import JBGLogger
+from urllib.parse import unquote_plus
 
 from fastapi import FastAPI
 
@@ -63,7 +64,8 @@ def clean_up_files(audio_file_path: Path, transcriptions_path: Path):
 # To find and log the current user
 @app.get("/me")
 def get_user(request: Request):
-    user = request.headers.get("X-MS-CLIENT-PRINCIPAL-NAME", "okänd användare")
+    raw_user = request.headers.get("X-MS-CLIENT-PRINCIPAL-NAME", "okänd användare")
+    user = unquote_plus(raw_user)
     logger.info(f" Användare inloggad: {user}")
     return {"user": user}
 
