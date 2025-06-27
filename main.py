@@ -6,12 +6,18 @@ import sys
 import shutil
 import uuid
 import src.JBGtranscriber as JBGtranscriber
+from src.JBGSecureFileHandler import SecureFileHandler
 from pathlib import Path
 import torch
 from src.JBGLogger import JBGLogger
 from urllib.parse import unquote_plus
-
+import base64
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+import secrets
+from io import BytesIO
 
 logger = JBGLogger(level="INFO").logger
 
@@ -32,19 +38,37 @@ os.chmod(RESULTS_FOLDER, 0o777)
 
 # Function to transcribe in the background
 def transcribe_audio(file_path: str, result_path: str, device: str, api_key:str, openai_model: str, summarize: bool, \
-    summary_style: str, suspicious: bool, questions: bool, speakers: bool):
+    summary_style: str, suspicious: bool, questions: bool, speakers: bool, encryption_key: str = ""):
     
+    if encryption_key:
+        secure_handler = SecureFileHandler(encryption_key)
+    else:
+        secure_handler = None
+
     transcriber = JBGtranscriber.JBGtranscriber(Path(file_path), Path(result_path), device=device, \
-        api_key=api_key, openai_model = openai_model)
+        api_key=api_key, openai_model = openai_model, secure_handler = secure_handler)
+    
+    if secure_handler:
+        audio_stream = secure_handler.decrypt_bytesio(file_path)
+    else:
+        audio_stream = None
+    transcriber.audio_stream = audio_stream
     
     try:
-       transcriber.perform_transcription_steps(
+        transcriber.perform_transcription_steps(
         generate_summary=summarize,
         summary_style=summary_style,
         find_suspicious_phrases=suspicious,
         suggest_follow_up_questions=questions,
         analyze_speakers=speakers
     )
+        # 🔥 Radera krypterad mp3-fil från disk
+        try:
+            os.remove(file_path)
+            logger.info(f"Krypterad ljudfil raderad efter avkryptering och transkribering: {file_path}")
+        except Exception as e:
+            logger.warning(f"Misslyckades med att radera krypterad fil efter avkryptering och transkribering {file_path}: {e}")
+
     except Exception as e:
         return JSONResponse({"Transcription error": str(e)}, status_code=500)
     else:
@@ -74,6 +98,7 @@ def get_user(request: Request):
 async def upload_audio(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    encryption_key: str = Form(""),
     api_key: str = Form(...),
     model: str = Form("gpt-4o"),
     summarize: bool = Form(False),
@@ -96,7 +121,11 @@ async def upload_audio(
     file_id = str(uuid.uuid4())
     file_path = os.path.join(UPLOAD_FOLDER, file_id + ".mp3")
     result_path = os.path.join(RESULTS_FOLDER, file_id + ".mp3.txt")
-    
+
+    if encryption_key:
+        logger.info("Krypterad fil sparas...")
+    else:
+        logger.info("Ej krypterad fil sparas...")
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
@@ -131,13 +160,41 @@ async def get_transcription(file_id: str):
 
 # Endpoint to download transcription as a file
 @app.get("/download/{file_id}")
-async def download_transcription(file_id: str):
+async def download_transcription(file_id: str, key: str = ""):
     result_path = os.path.join(RESULTS_FOLDER, file_id + ".mp3.txt")
 
     if not os.path.exists(result_path):
         return JSONResponse({"error": "Transcription not found"}, status_code=404)
 
-    return FileResponse(result_path, filename=f"{file_id}.txt", media_type="text/plain")
+    with open(result_path, "r", encoding="utf-8") as f:
+        plain_text = f.read()
+
+    if key:
+        try:
+            key_bytes = base64.b64decode(key)
+            aesgcm = AESGCM(key_bytes)
+            iv = secrets.token_bytes(12)
+            encrypted = aesgcm.encrypt(iv, plain_text.encode("utf-8"), None)
+
+            # Skapa en minnesfil att streama (IV + krypterad data)
+            stream = BytesIO()
+            stream.write(iv + encrypted)
+            stream.seek(0)
+
+            filename = f"{file_id}.encrypted.txt"
+            return StreamingResponse(
+                stream,
+                media_type="application/octet-stream",
+                headers={"Content-Disposition": f"attachment; filename={filename}"}
+            )
+        except Exception as e:
+            logger.error(f"Kryptering av transkriptionsfil misslyckades: {e}")
+            return JSONResponse({"error": "Kunde inte kryptera resultatfilen."}, status_code=500)
+
+    else:
+        # Fallback: returnera okrypterad textfil
+        return FileResponse(result_path, filename=f"{file_id}.txt", media_type="text/plain")
+
 
 # ----------------------------------------------------------------
 # Return the connection with the frontend

@@ -49,6 +49,7 @@ class JBGtranscriber():
                  device = "cpu",
                  api_key = None,
                  openai_model = "gpt-4o",
+                 secure_handler = None,
                  transcriber_model_id=TRANSCRIBER_MODEL_DEFAULT,
                  insert_linebreaks=False
                  ):
@@ -56,6 +57,8 @@ class JBGtranscriber():
         self.export_path = Path(export_path)
         self.api_key = api_key
         self.openai_model = openai_model
+        self.secure_handler = secure_handler
+        self.audio_stream = None    # Used with encryption mode on
         self.transcriber_model_id = transcriber_model_id
         self.insert_linebreaks = insert_linebreaks
         self.device, self.torch_dtype = JBGtranscriber.do_nvidia_check(device)
@@ -377,19 +380,22 @@ class JBGtranscriber():
     def transcribe(self):
         """Put together the model of choice and do the transcription"""
     
-        # Ensure cache directory exists
-        Path("cache").mkdir(exist_ok=True)
+        # The option to use cached transcription is not available during encrypted mode
+        if not self.secure_handler:
+            Path("cache").mkdir(exist_ok=True)
 
-        # Check cache
-        cache_file = self.get_transcription_cache_path()
-        if cache_file.exists():
-            logger.info(f" Using cached transcription: {cache_file.name}")
-            with open(cache_file, "r", encoding="utf-8") as f:
-                content = f.read()
-                parts = content.split(CACHE_TIMESTAMPED_MARKER)
-                self.transcription = parts[0].replace(CACHE_TRANSCRIPTION_MARKER, "").strip()
-                self.transcription_w_timestamps = parts[1].strip() if len(parts) > 1 else ""
-            return
+            # Check cache
+            cache_file = self.get_transcription_cache_path()
+            if cache_file.exists():
+                logger.info(f" Using cached transcription: {cache_file.name}")
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    content = f.read()
+                    parts = content.split(CACHE_TIMESTAMPED_MARKER)
+                    self.transcription = parts[0].replace(CACHE_TRANSCRIPTION_MARKER, "").strip()
+                    self.transcription_w_timestamps = parts[1].strip() if len(parts) > 1 else ""
+                return
+        else:
+            logger.warning(f" Cannot use cached transcriptions and encryption as the same time")
     
         # What model to use is decided dynamically
         for model_id in self.TRANSCRIBER_MODEL_CANDIDATES:
@@ -424,7 +430,8 @@ class JBGtranscriber():
                 generate_kwargs = {"task": "transcribe", "language": "sv"}
 
                 # Do transcription
-                result = pipe(str(self.convert_path), 
+                audio_input = self.audio_stream if self.audio_stream else str(self.convert_path)
+                result = pipe(audio_input, 
                         chunk_length_s=30,
                         generate_kwargs=generate_kwargs, 
                         return_timestamps=True)
@@ -477,21 +484,39 @@ class JBGtranscriber():
     def write_to_output_file(self):
         """Write final result to the output file"""
         
-        try:
-            with open(self.export_path, "w", encoding="utf-8") as export_file:
-                export_file.write("### Rå transkribering:\n" + self.transcription + "\n\n")
-                export_file.write("### Transkribering med tidsstämplar:\n" + self.transcription_w_timestamps + "\n\n")
-                if self.summary:
-                    export_file.write("### Sammanfattning:\n" + self.summary + "\n\n")
-                if self.marked_text:
-                    export_file.write("### Transkription med markerade misstänkta fraser:\n" + self.marked_text + "\n\n")
-                if self.follow_up_questions:
-                    export_file.write("### Uppföljningsfrågor:\n" + self.follow_up_questions + "\n\n")
-                if self.analyze_speakers:
-                    export_file.write("### Försök till identifiering av olika talare:\n" + self.analyze_speakers + "\n")
-                    
-        except Exception as ex:
-            logger.info(f"Something went wrong on writing transcription results to the file {self.export_path}: {str(ex)}")
+        if self.secure_handler:
+            logger.info("Sparar transkription krypterat med SecureFileHandler...")
+            full_text = ""
+            full_text += "### Rå transkribering:\n" + self.transcription + "\n\n"
+            full_text += "### Transkribering med tidsstämplar:\n" + self.transcription_w_timestamps + "\n\n"
+            if self.summary:
+                full_text += "### Sammanfattning:\n" + self.summary + "\n\n"
+            if self.marked_text:
+                full_text += "### Transkription med markerade misstänkta fraser:\n" + self.marked_text + "\n\n"
+            if self.follow_up_questions:
+                full_text += "### Uppföljningsfrågor:\n" + self.follow_up_questions + "\n\n"
+            if self.analyze_speakers:
+                full_text += "### Försök till identifiering av olika talare:\n" + self.analyze_speakers + "\n"
+
+            try:
+                self.secure_handler.encrypt_text(full_text, str(self.export_path))
+            except Exception as ex:
+                logger.error(f"Kryptering av transkriptionsfil misslyckades: {str(ex)}")
+        else:
+            try:
+                with open(self.export_path, "w", encoding="utf-8") as export_file:
+                    export_file.write("### Rå transkribering:\n" + self.transcription + "\n\n")
+                    export_file.write("### Transkribering med tidsstämplar:\n" + self.transcription_w_timestamps + "\n\n")
+                    if self.summary:
+                        export_file.write("### Sammanfattning:\n" + self.summary + "\n\n")
+                    if self.marked_text:
+                        export_file.write("### Transkription med markerade misstänkta fraser:\n" + self.marked_text + "\n\n")
+                    if self.follow_up_questions:
+                        export_file.write("### Uppföljningsfrågor:\n" + self.follow_up_questions + "\n\n")
+                    if self.analyze_speakers:
+                        export_file.write("### Försök till identifiering av olika talare:\n" + self.analyze_speakers + "\n")
+            except Exception as ex:
+                logger.error(f"Misslyckades med att spara transkriptionsfil: {str(ex)}")
             
     def perform_transcription_steps(
         self,
