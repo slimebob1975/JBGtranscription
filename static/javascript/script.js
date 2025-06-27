@@ -108,6 +108,16 @@ async function uploadFile() {
     formData.append("questions", document.getElementById("optQuestions").checked);
     formData.append("speakers", document.getElementById("optSpeakers").checked);
 
+    // Check Formdata for errors.
+    for (const [key, value] of formData.entries()) {
+        // Om värdet är en Blob (fil), visa namn och typ
+        if (value instanceof Blob) {
+            console.log(`${key}: [Blob] filename=${value.name}, type=${value.type}, size=${value.size}`);
+        } else {
+            console.log(`${key}: ${value}`);
+        }
+    }
+    
     // Disable inputs
     fileInput.disabled = true;
     document.getElementById("button").disabled = true;
@@ -149,10 +159,19 @@ async function checkStatus(file_id) {
             if (encryptionEnabled && globalEncryptionKeyBase64) {
                 // 🔽 Hämta som Blob från backend med nyckel i querystring
                 const downloadResp = await fetch(`/download/${file_id}?key=${encodeURIComponent(globalEncryptionKeyBase64)}`);
+                if (!downloadResp.ok) {
+                    alert("Nedladdning misslyckades.");
+                    return;
+                }
                 const blob = await downloadResp.blob();
 
                 const arrayBuffer = await blob.arrayBuffer();
                 const iv = arrayBuffer.slice(0, 12);
+                if (iv.byteLength !== 12) {
+                    console.error("Felaktig IV-längd:", iv.byteLength);
+                    alert("Fel vid dekryptering: ogiltig IV.");
+                    return;
+                }
                 const ciphertext = arrayBuffer.slice(12);
 
                 const rawKey = Uint8Array.from(atob(globalEncryptionKeyBase64), c => c.charCodeAt(0));
@@ -187,5 +206,5 @@ async function checkStatus(file_id) {
         } else {
             checkStatus(file_id);
         }
-    }, 5000);
+    },10000);
 }

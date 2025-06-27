@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, BackgroundTasks, Form, Request
+from fastapi import FastAPI, File, UploadFile, BackgroundTasks, Form, Request, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 import os
@@ -12,7 +12,6 @@ import torch
 from src.JBGLogger import JBGLogger
 from urllib.parse import unquote_plus
 import base64
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -37,9 +36,10 @@ os.makedirs(RESULTS_FOLDER, exist_ok=True)
 os.chmod(RESULTS_FOLDER, 0o777)
 
 # Function to transcribe in the background
-def transcribe_audio(file_path: str, result_path: str, device: str, api_key:str, openai_model: str, summarize: bool, \
-    summary_style: str, suspicious: bool, questions: bool, speakers: bool, encryption_key: str = ""):
+def transcribe_audio(file_path: str, encryption_key: str, result_path: str, device: str, api_key:str, openai_model: str, \
+    summarize: bool, summary_style: str, suspicious: bool, questions: bool, speakers: bool):
     
+    logger.info(f"Transcribe audio was called with encryption key: {encryption_key != ''}")
     if encryption_key:
         secure_handler = SecureFileHandler(encryption_key)
     else:
@@ -49,7 +49,7 @@ def transcribe_audio(file_path: str, result_path: str, device: str, api_key:str,
         api_key=api_key, openai_model = openai_model, secure_handler = secure_handler)
     
     if secure_handler:
-        audio_stream = secure_handler.decrypt_bytesio(file_path)
+        audio_stream = secure_handler.decrypt_file_to_memory(file_path)
     else:
         audio_stream = None
     transcriber.audio_stream = audio_stream
@@ -78,12 +78,14 @@ def transcribe_audio(file_path: str, result_path: str, device: str, api_key:str,
 def clean_up_files(audio_file_path: Path, transcriptions_path: Path):
     
     # Remove last audio file
-    Path.unlink(audio_file_path)
+    if audio_file_path.exists():
+        Path.unlink(audio_file_path)
     
     # Remove all but the last transcription file (which is the transcription of the audio file)
     old_transcripts = sorted([file for file in transcriptions_path.glob("*.mp3.txt")], key=lambda x: x.stat().st_ctime)[:-1]
     for file in old_transcripts:
-        Path.unlink(file)
+        if file.exists():
+            Path.unlink(file)
 
 # To find and log the current user
 @app.get("/me")
@@ -108,6 +110,13 @@ async def upload_audio(
     speakers: bool = Form(False)
 ):
     
+    logger.info(f"Upload endpoint received encryption_key: {'✅ present' if encryption_key else '❌ missing or empty'}")
+    logger.info(f"Length of encryption_key: {len(encryption_key)} characters")
+    try:
+        _ = base64.b64decode(encryption_key, validate=True)
+        logger.info("encryption_key verkar vara giltig base64")
+    except Exception:
+        logger.warning("encryption_key är INTE giltig base64!")
     logger.info(f"""
           OpenAI API key was provided: {api_key != "sk-..."}\n
           OpenAI model of choice: {model}\n
@@ -119,7 +128,7 @@ async def upload_audio(
           """)
     
     file_id = str(uuid.uuid4())
-    file_path = os.path.join(UPLOAD_FOLDER, file_id + ".mp3")
+    file_path = os.path.join(UPLOAD_FOLDER, file_id + (".mp3.encrypted" if encryption_key else ".mp3"))    
     result_path = os.path.join(RESULTS_FOLDER, file_id + ".mp3.txt")
 
     if encryption_key:
@@ -132,6 +141,7 @@ async def upload_audio(
     background_tasks.add_task(
         transcribe_audio,
         file_path,
+        encryption_key,
         result_path,
         DEVICE,
         api_key,
@@ -147,16 +157,28 @@ async def upload_audio(
 
 # Endpoint to get transcription as JSON
 @app.get("/transcription/{file_id}")
-async def get_transcription(file_id: str):
-    result_path = os.path.join(RESULTS_FOLDER, file_id + ".mp3.txt")
+async def get_transcription(file_id: str, encryption_key: str = None):
+    result_path = Path(RESULTS_FOLDER) / f"{file_id}.mp3.txt"
+
+    if not result_path.exists():
+        raise HTTPException(status_code=404, detail="Transkriberingsresultat hittades inte.")
+
+    try:
+        if encryption_key:
+            logger.info("Dekrypterar transkriptionsfil med angiven nyckel...")
+            secure_handler = SecureFileHandler(encryption_key)
+            decrypted_stream = secure_handler.decrypt_file_to_memory(str(result_path))
+            content = decrypted_stream.read().decode("utf-8")
+        else:
+            logger.info("Läser okrypterad transkriptionsfil...")
+            with open(result_path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+        return {"transcription": content}
     
-    if not os.path.exists(result_path):
-        return JSONResponse({"error": "Transcription not ready yet."}, status_code=404)
-
-    with open(result_path, "r", encoding="utf-8") as f:
-        content = f.read()
-
-    return JSONResponse({"transcription": content})
+    except Exception as e:
+        logger.error(f"Fel vid inläsning av transkriptionsfil: {e}")
+        raise HTTPException(status_code=500, detail="Fel vid läsning av transkriptionsfil.")
 
 # Endpoint to download transcription as a file
 @app.get("/download/{file_id}")
