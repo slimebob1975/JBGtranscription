@@ -145,66 +145,36 @@ async function uploadFile() {
 
 // ✅ Polling for transcription status
 async function checkStatus(file_id) {
-    let spinner = document.getElementById("spinner-container");
+    const spinner = document.getElementById("spinner-container");
     spinner.style.display = "block";
 
     setTimeout(async () => {
-        let response = await fetch("/transcription/" + file_id);
-        if (response.ok) {
-            spinner.style.display = "none";
+        try {
+            // Get decrypted transcription from server
+            const url = `/transcription/${file_id}?encryption_key=${encodeURIComponent(globalEncryptionKeyBase64 || "")}`;
+            const response = await fetch(url);
 
-            const result = await response.json();
-            const fileId = result.transcription ? null : file_id;
-
-            if (encryptionEnabled && globalEncryptionKeyBase64) {
-                // 🔽 Hämta som Blob från backend med nyckel i querystring
-                const downloadResp = await fetch(`/download/${file_id}?key=${encodeURIComponent(globalEncryptionKeyBase64)}`);
-                if (!downloadResp.ok) {
-                    alert("Nedladdning misslyckades.");
-                    return;
-                }
-                const blob = await downloadResp.blob();
-
-                const arrayBuffer = await blob.arrayBuffer();
-                const iv = arrayBuffer.slice(0, 12);
-                if (iv.byteLength !== 12) {
-                    console.error("Felaktig IV-längd:", iv.byteLength);
-                    alert("Fel vid dekryptering: ogiltig IV.");
-                    return;
-                }
-                const ciphertext = arrayBuffer.slice(12);
-
-                const rawKey = Uint8Array.from(atob(globalEncryptionKeyBase64), c => c.charCodeAt(0));
-                const cryptoKey = await crypto.subtle.importKey("raw", rawKey, { name: "AES-GCM" }, false, ["decrypt"]);
-
-                try {
-                    const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv }, cryptoKey, ciphertext);
-                    const decodedText = new TextDecoder().decode(decrypted);
-
-                    document.getElementById("status").innerText = "Transkribering avslutad.";
-                    document.getElementById("result").value = decodedText;
-                    document.getElementById("result").style.display = "inline";
-
-                    // Skapa nedladdningsbar version
-                    const textBlob = new Blob([decodedText], { type: "text/plain" });
-                    const url = URL.createObjectURL(textBlob);
-                    document.getElementById("downloadLink").href = url;
-                    document.getElementById("downloadLink").style.display = "inline";
-                } catch (e) {
-                    alert("Dekryptering av transkription misslyckades.");
-                    console.error("Dekryptering:", e);
-                }
-            } else {
-                // Klartextfall – om kryptering inte var aktiv
-                document.getElementById("status").innerText = "Transkribering avslutad.";
-                document.getElementById("result").value = result.transcription;
-                document.getElementById("result").style.display = "inline";
-                document.getElementById("downloadLink").href = `/download/${file_id}`;
-                document.getElementById("downloadLink").style.display = "inline";
+            if (!response.ok) {
+                checkStatus(file_id); // Retry
+                return;
             }
 
-        } else {
+            const result = await response.json();
+            const decodedText = result.transcription;
+
+            spinner.style.display = "none";
+            document.getElementById("status").innerText = "Transkribering avslutad.";
+            document.getElementById("result").value = decodedText;
+            document.getElementById("result").style.display = "inline";
+
+            // Create a Blob and download link for the result
+            const textBlob = new Blob([decodedText], { type: "text/plain" });
+            const urlBlob = URL.createObjectURL(textBlob);
+            document.getElementById("downloadLink").href = urlBlob;
+            document.getElementById("downloadLink").style.display = "inline";
+        } catch (err) {
+            console.error("Fel vid statuskontroll:", err);
             checkStatus(file_id);
         }
-    },10000);
+    }, 10000);
 }

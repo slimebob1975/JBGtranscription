@@ -65,9 +65,9 @@ def transcribe_audio(file_path: str, encryption_key: str, result_path: str, devi
         # 🔥 Radera krypterad mp3-fil från disk
         try:
             os.remove(file_path)
-            logger.info(f"Krypterad ljudfil raderad efter avkryptering och transkribering: {file_path}")
+            logger.info(f"Uppladdad ljudfil raderad efter ev. kryptering och transkribering: {file_path}")
         except Exception as e:
-            logger.warning(f"Misslyckades med att radera krypterad fil efter avkryptering och transkribering {file_path}: {e}")
+            logger.warning(f"Misslyckades med att radera uppladdad ljudfil efter ev. kryptering och transkribering: {file_path}: {e}")
 
     except Exception as e:
         return JSONResponse({"Transcription error": str(e)}, status_code=500)
@@ -86,6 +86,25 @@ def clean_up_files(audio_file_path: Path, transcriptions_path: Path):
     for file in old_transcripts:
         if file.exists():
             Path.unlink(file)
+            
+def decrypt_transcription_file_if_needed(result_path: str, encryption_key: str) -> str:
+
+    if encryption_key:
+        try:
+            secure_handler = SecureFileHandler(encryption_key)
+            decrypted_stream = secure_handler.decrypt_file_to_memory(result_path)
+            return decrypted_stream.read().decode("utf-8")
+        except Exception as e:
+            logger.error(f"Decryption failed: {e}")
+            raise HTTPException(status_code=500, detail="Could not decrypt transcription file.")
+    else:
+        try:
+            with open(result_path, "r", encoding="utf-8") as f:
+                return f.read()
+        except Exception as e:
+            logger.error(f"Reading plaintext transcription failed: {e}")
+            raise HTTPException(status_code=500, detail="Could not read transcription file.")
+
 
 # To find and log the current user
 @app.get("/me")
@@ -157,28 +176,15 @@ async def upload_audio(
 
 # Endpoint to get transcription as JSON
 @app.get("/transcription/{file_id}")
-async def get_transcription(file_id: str, encryption_key: str = None):
-    result_path = Path(RESULTS_FOLDER) / f"{file_id}.mp3.txt"
+async def get_transcription(file_id: str, encryption_key: str = ""):
+    result_path = os.path.join(RESULTS_FOLDER, file_id + ".mp3.txt")
 
-    if not result_path.exists():
+    if not os.path.exists(result_path):
         raise HTTPException(status_code=404, detail="Transkriberingsresultat hittades inte.")
 
-    try:
-        if encryption_key:
-            logger.info("Dekrypterar transkriptionsfil med angiven nyckel...")
-            secure_handler = SecureFileHandler(encryption_key)
-            decrypted_stream = secure_handler.decrypt_file_to_memory(str(result_path))
-            content = decrypted_stream.read().decode("utf-8")
-        else:
-            logger.info("Läser okrypterad transkriptionsfil...")
-            with open(result_path, "r", encoding="utf-8") as f:
-                content = f.read()
+    content = decrypt_transcription_file_if_needed(result_path, encryption_key)
+    return {"transcription": content}
 
-        return {"transcription": content}
-    
-    except Exception as e:
-        logger.error(f"Fel vid inläsning av transkriptionsfil: {e}")
-        raise HTTPException(status_code=500, detail="Fel vid läsning av transkriptionsfil.")
 
 # Endpoint to download transcription as a file
 @app.get("/download/{file_id}")
@@ -188,35 +194,18 @@ async def download_transcription(file_id: str, key: str = ""):
     if not os.path.exists(result_path):
         return JSONResponse({"error": "Transcription not found"}, status_code=404)
 
-    with open(result_path, "r", encoding="utf-8") as f:
-        plain_text = f.read()
-
-    if key:
-        try:
-            key_bytes = base64.b64decode(key)
-            aesgcm = AESGCM(key_bytes)
-            iv = secrets.token_bytes(12)
-            encrypted = aesgcm.encrypt(iv, plain_text.encode("utf-8"), None)
-
-            # Skapa en minnesfil att streama (IV + krypterad data)
-            stream = BytesIO()
-            stream.write(iv + encrypted)
-            stream.seek(0)
-
-            filename = f"{file_id}.encrypted.txt"
-            return StreamingResponse(
-                stream,
-                media_type="application/octet-stream",
-                headers={"Content-Disposition": f"attachment; filename={filename}"}
-            )
-        except Exception as e:
-            logger.error(f"Kryptering av transkriptionsfil misslyckades: {e}")
-            return JSONResponse({"error": "Kunde inte kryptera resultatfilen."}, status_code=500)
-
-    else:
-        # Fallback: returnera okrypterad textfil
-        return FileResponse(result_path, filename=f"{file_id}.txt", media_type="text/plain")
-
+    try:
+        content = decrypt_transcription_file_if_needed(result_path, key)
+        stream = BytesIO(content.encode("utf-8"))
+        filename = f"{file_id}.txt"
+        return StreamingResponse(
+            stream,
+            media_type="text/plain",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except Exception as e:
+        logger.error(f"Could not stream transcription result: {e}")
+        return JSONResponse({"error": "Failed to serve transcription file."}, status_code=500)
 
 # ----------------------------------------------------------------
 # Return the connection with the frontend
