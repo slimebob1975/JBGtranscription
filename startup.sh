@@ -4,7 +4,7 @@
 echo "[INFO] Checking for ffmpeg..."
 ffmpeg -version || echo "[INFO] ffmpeg not found, installing..."
 apt-get update
-apt-get install -y ffmpeg
+apt-get install -y ffmpeg libsndfile1
 echo "[INFO] Installed version:"
 ffmpeg -version
 

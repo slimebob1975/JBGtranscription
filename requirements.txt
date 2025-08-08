@@ -7,7 +7,6 @@ ffmpeg-python
 tiktoken
 python-multipart
 python-dotenv
-docx
 transformers
 numpy
 pydub
