@@ -12,3 +12,4 @@ numpy
 pydub
 cryptography
 resampy
+audioop-lts
