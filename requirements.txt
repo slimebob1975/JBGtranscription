@@ -10,3 +10,6 @@ python-dotenv
 docx
 transformers
 numpy
+pydub
+cryptography
+resampy
