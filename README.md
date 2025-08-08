@@ -94,9 +94,25 @@ Then open your browser at:
 
 📄 The transcription will appear when ready, with a download link to the full `.txt` file.
 
+Absolutely — here’s the **English version** of the same encryption section, written to match the tone and structure of your existing `README.md`:
+
 ---
 
-Absolutely — here's the updated section of the `README.md` with a clear note on language support:
+## 🔐 Encryption (Optional)
+
+You can optionally enable **client-side encryption** before uploading your audio file:
+
+1. When encryption is enabled, an **AES-256-GCM** key is generated locally in the browser.
+2. The `.mp3` file is encrypted in the browser before being uploaded.
+3. Both the encrypted file and the base64-encoded key are sent to the server over a **secure HTTPS connection**.
+4. On the server, the file is decrypted **in memory** (never written to disk in plaintext) for transcription.
+5. The resulting transcription text is then **re-encrypted** with the same key and stored as an encrypted `.txt` file.
+6. When retrieving or downloading the result, the key is sent along with the request, and the server **decrypts the transcription** before sending it to the client.
+7. The transcription is displayed as plaintext in the browser and can be downloaded as a `.txt` file.
+
+The encryption key is never stored server-side and must remain available in the user's browser session to access the result.
+
+> If encryption is disabled, the audio file is uploaded in plaintext, and the resulting transcription is stored as an unencrypted file.
 
 ---
 

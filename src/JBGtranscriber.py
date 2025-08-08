@@ -10,6 +10,10 @@ try:
     import tiktoken
     import time
     import psutil
+    from pydub import AudioSegment
+    import io
+    import numpy as np
+    import resampy
 except ModuleNotFoundError as ex:
     sys.exit("You probably need to install some missing modules:" + str(ex))
 from src.JBGLogger import JBGLogger
@@ -20,6 +24,9 @@ CACHE_TIMESTAMPED_MARKER = "===TIMESTAMPED==="
  # Max tokens per segment (input + output < 8000 tokens)
 MAX_INPUT_TOKENS = 3500
 OVERLAP_TOKENS = 300
+
+# Resampling target rate
+RESAMPLING_TARGET_RATE = 16000
 
 logger = JBGLogger(level="INFO").logger
     
@@ -49,6 +56,7 @@ class JBGtranscriber():
                  device = "cpu",
                  api_key = None,
                  openai_model = "gpt-4o",
+                 secure_handler = None,
                  transcriber_model_id=TRANSCRIBER_MODEL_DEFAULT,
                  insert_linebreaks=False
                  ):
@@ -56,6 +64,8 @@ class JBGtranscriber():
         self.export_path = Path(export_path)
         self.api_key = api_key
         self.openai_model = openai_model
+        self.secure_handler = secure_handler
+        self.audio_stream = None    # Used with encryption mode on
         self.transcriber_model_id = transcriber_model_id
         self.insert_linebreaks = insert_linebreaks
         self.device, self.torch_dtype = JBGtranscriber.do_nvidia_check(device)
@@ -376,42 +386,62 @@ class JBGtranscriber():
     
     def transcribe(self):
         """Put together the model of choice and do the transcription"""
-    
-        # Ensure cache directory exists
-        Path("cache").mkdir(exist_ok=True)
 
-        # Check cache
-        cache_file = self.get_transcription_cache_path()
-        if cache_file.exists():
-            logger.info(f" Using cached transcription: {cache_file.name}")
-            with open(cache_file, "r", encoding="utf-8") as f:
-                content = f.read()
-                parts = content.split(CACHE_TIMESTAMPED_MARKER)
-                self.transcription = parts[0].replace(CACHE_TRANSCRIPTION_MARKER, "").strip()
-                self.transcription_w_timestamps = parts[1].strip() if len(parts) > 1 else ""
-            return
-    
-        # What model to use is decided dynamically
+        # The option to use cached transcription is not available during encrypted mode
+        if not self.secure_handler:
+            Path("cache").mkdir(exist_ok=True)
+            cache_file = self.get_transcription_cache_path()
+            if cache_file.exists():
+                logger.info(f" Using cached transcription: {cache_file.name}")
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    content = f.read()
+                    parts = content.split(CACHE_TIMESTAMPED_MARKER)
+                    self.transcription = parts[0].replace(CACHE_TRANSCRIPTION_MARKER, "").strip()
+                    self.transcription_w_timestamps = parts[1].strip() if len(parts) > 1 else ""
+                return
+        else:
+            logger.warning(f" Cannot use cached transcriptions and encryption as the same time")
+            if self.audio_stream:
+                from pydub import AudioSegment
+                import io
+
+                self.audio_stream.seek(0)
+                try:
+                    # Läs MP3 från stream
+                    audio = AudioSegment.from_file(io.BytesIO(self.audio_stream.read()), format="mp3")
+
+                    # Konvertera till mono, 16-bit, 16kHz om det behövs
+                    audio = audio.set_channels(1).set_sample_width(2)
+                    original_rate = audio.frame_rate
+                    if original_rate != RESAMPLING_TARGET_RATE:
+                        logger.info(f"Resampling from {original_rate} Hz to {RESAMPLING_TARGET_RATE} Hz")
+                        audio = audio.set_frame_rate(RESAMPLING_TARGET_RATE)
+                    self.samplerate = audio.frame_rate
+
+                    # Extrahera samples
+                    samples = np.array(audio.get_array_of_samples(), dtype=np.float32) / 32768.0
+                    self.audio_data = samples
+                except Exception as e:
+                    logger.error(f" Failed to load or process audio stream: {e}")
+                    raise e
+            else:
+                raise ValueError("Ingen audio_stream tillgänglig")
+
         for model_id in self.TRANSCRIBER_MODEL_CANDIDATES:
             try:
                 logger.info(f"Trying model: {model_id}")
-                
-                # First check if the RAM will fit the model in question
                 required_ram_gb = self.TRANSCRIBER_MODEL_RAM_REQUIREMENTS.get(model_id, None)
                 if not required_ram_gb or not self._enough_memory(required_ram_gb):
                     logger.warning(f"Skipping model {model_id} -- it is estimated that the available RAM is not enough.")
                     continue
-                else:
-                    logger.info(f"Estimated RAM requirement for model {model_id}: {required_ram_gb} GB")
-                
-                # Move on an set up the model
+                logger.info(f"Estimated RAM requirement for model {model_id}: {required_ram_gb} GB")
+
                 model = AutoModelForSpeechSeq2Seq.from_pretrained(
                     model_id, torch_dtype=self.torch_dtype, use_safetensors=True, cache_dir=JBGtranscriber.CACHE_DIR
                 )
                 model.to(self.device)
                 processor = AutoProcessor.from_pretrained(model_id)
 
-                # Define pipeline
                 pipe = pipeline(
                     "automatic-speech-recognition",
                     model=model,
@@ -423,40 +453,33 @@ class JBGtranscriber():
 
                 generate_kwargs = {"task": "transcribe", "language": "sv"}
 
-                # Do transcription
-                result = pipe(str(self.convert_path), 
-                        chunk_length_s=30,
-                        generate_kwargs=generate_kwargs, 
-                        return_timestamps=True)
-                
+                audio_input = self.audio_data if hasattr(self, "audio_data") else str(self.convert_path)
+                result = pipe(
+                    audio_input,
+                    #chunk_length_s=30,
+                    generate_kwargs=generate_kwargs,
+                    return_timestamps=True
+                )
+
                 self.transcription, self.transcription_w_timestamps = self._postprocess_result(result)
-                
                 logger.info(f" Transcription successful with model: {model_id}")
+
                 
-                with open(cache_file, "w", encoding="utf-8") as f:
-                    f.write(f"{CACHE_TRANSCRIPTION_MARKER}\n")
-                    f.write(self.transcription + "\n")
-                    f.write(f"\n{CACHE_TIMESTAMPED_MARKER}\n")
-                    f.write(self.transcription_w_timestamps)
-                
-                logger.info(f" Transcription and timestamps cached as: {cache_file.name}")
-                return  # success
-            
-            except RuntimeError as e:
-                if "out of memory" in str(e).lower():
-                    logger.warning(f"Model {model_id} failed due to Runtime memory error: {str(e)}. Trying next model...")
-                    torch.cuda.empty_cache()
-                    continue
-                else:
-                    logger.error(f"Transcription failed with model {model_id}: {e}")
-                    raise e
-            except MemoryError as e:
-                logger.warning(f"Model {model_id} failed due to Python memory error: {str(e)}. Trying next model...")
+                if not self.secure_handler:
+                    cache_file = self.get_transcription_cache_path()
+                    with open(cache_file, "w", encoding="utf-8") as f:
+                        f.write(f"{CACHE_TRANSCRIPTION_MARKER}\n")
+                        f.write(self.transcription + "\n")
+                        f.write(f"\n{CACHE_TIMESTAMPED_MARKER}\n")
+                        f.write(self.transcription_w_timestamps)
+
+                    logger.info(f" Transcription and timestamps cached as: {cache_file.name}")
+                return
+
             except Exception as e:
-                logger.error(f"Unexpected error with model {model_id}: {e}")
-                raise e
-        
-        # If none succeed we are really in trouble
+                logger.error(f"Model {model_id} failed: {e}")
+                continue
+
         raise RuntimeError("All model options failed. Try reducing file size or increasing memory.")
 
     def _postprocess_result(self, result):
@@ -477,21 +500,39 @@ class JBGtranscriber():
     def write_to_output_file(self):
         """Write final result to the output file"""
         
-        try:
-            with open(self.export_path, "w", encoding="utf-8") as export_file:
-                export_file.write("### Rå transkribering:\n" + self.transcription + "\n\n")
-                export_file.write("### Transkribering med tidsstämplar:\n" + self.transcription_w_timestamps + "\n\n")
-                if self.summary:
-                    export_file.write("### Sammanfattning:\n" + self.summary + "\n\n")
-                if self.marked_text:
-                    export_file.write("### Transkription med markerade misstänkta fraser:\n" + self.marked_text + "\n\n")
-                if self.follow_up_questions:
-                    export_file.write("### Uppföljningsfrågor:\n" + self.follow_up_questions + "\n\n")
-                if self.analyze_speakers:
-                    export_file.write("### Försök till identifiering av olika talare:\n" + self.analyze_speakers + "\n")
-                    
-        except Exception as ex:
-            logger.info(f"Something went wrong on writing transcription results to the file {self.export_path}: {str(ex)}")
+        if self.secure_handler:
+            logger.info("Sparar transkription krypterat med SecureFileHandler...")
+            full_text = ""
+            full_text += "### Rå transkribering:\n" + self.transcription + "\n\n"
+            full_text += "### Transkribering med tidsstämplar:\n" + self.transcription_w_timestamps + "\n\n"
+            if self.summary:
+                full_text += "### Sammanfattning:\n" + self.summary + "\n\n"
+            if self.marked_text:
+                full_text += "### Transkription med markerade misstänkta fraser:\n" + self.marked_text + "\n\n"
+            if self.follow_up_questions:
+                full_text += "### Uppföljningsfrågor:\n" + self.follow_up_questions + "\n\n"
+            if self.analyze_speakers:
+                full_text += "### Försök till identifiering av olika talare:\n" + self.analyze_speakers + "\n"
+
+            try:
+                self.secure_handler.encrypt_text(full_text, str(self.export_path))
+            except Exception as ex:
+                logger.error(f"Kryptering av transkriptionsfil misslyckades: {str(ex)}")
+        else:
+            try:
+                with open(self.export_path, "w", encoding="utf-8") as export_file:
+                    export_file.write("### Rå transkribering:\n" + self.transcription + "\n\n")
+                    export_file.write("### Transkribering med tidsstämplar:\n" + self.transcription_w_timestamps + "\n\n")
+                    if self.summary:
+                        export_file.write("### Sammanfattning:\n" + self.summary + "\n\n")
+                    if self.marked_text:
+                        export_file.write("### Transkription med markerade misstänkta fraser:\n" + self.marked_text + "\n\n")
+                    if self.follow_up_questions:
+                        export_file.write("### Uppföljningsfrågor:\n" + self.follow_up_questions + "\n\n")
+                    if self.analyze_speakers:
+                        export_file.write("### Försök till identifiering av olika talare:\n" + self.analyze_speakers + "\n")
+            except Exception as ex:
+                logger.error(f"Misslyckades med att spara transkriptionsfil: {str(ex)}")
             
     def perform_transcription_steps(
         self,
