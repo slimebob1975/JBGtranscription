@@ -18,12 +18,18 @@ except ModuleNotFoundError as ex:
     sys.exit("You probably need to install some missing modules:" + str(ex))
 from src.JBGLogger import JBGLogger
     
+# Default markers
 CACHE_TRANSCRIPTION_MARKER = "===TRANSCRIPTION==="
 CACHE_TIMESTAMPED_MARKER = "===TIMESTAMPED==="
+MODEL_GPT_5_MARKER = "gpt-5"
 
  # Max tokens per segment (input + output < 8000 tokens)
 MAX_INPUT_TOKENS = 3500
 OVERLAP_TOKENS = 300
+
+# Temperature settings
+DEFAULT_TEMPERATURE = 0.7
+GPT_5_TEMPERATURE = 1.0
 
 # Resampling target rate
 RESAMPLING_TARGET_RATE = 16000
@@ -142,6 +148,15 @@ class JBGtranscriber():
         """Generates a list of mp3 files from a path"""
         
         return [file for file in Path(path).rglob("*.mp3")]
+    
+    @staticmethod
+    def get_permitted_temperature(gpt_model, temperature):
+        
+        try:
+            index = gpt_model.index(MODEL_GPT_5_MARKER)
+            return GPT_5_TEMPERATURE
+        except ValueError as ex:
+            return temperature
 
     def get_transcription_cache_path(self):
         """Generate a cache filename based on the audio file's full path (hashed)."""
@@ -161,7 +176,7 @@ class JBGtranscriber():
                 {"role": "developer", "content": "Du är en expert på transkriberingar av ljudfiler från exempelvis intervjuer."},
                 {"role": "user", "content": prompt},
             ],
-            temperature=0.7
+            temperature = JBGtranscriber.get_permitted_temperature(self.openai_model, DEFAULT_TEMPERATURE)
         )
 
         return completion.choices[0].message
@@ -177,7 +192,7 @@ class JBGtranscriber():
                 {"role": "system", "content": instructions},
                 {"role": "user", "content": input_message},
             ],
-            temperature=0.7
+            temperature = JBGtranscriber.get_permitted_temperature(self.openai_model, DEFAULT_TEMPERATURE)
         )
 
         return completion.choices[0].message
