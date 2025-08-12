@@ -13,3 +13,4 @@ pydub
 cryptography
 resampy
 audioop-lts
+psutil
