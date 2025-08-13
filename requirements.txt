@@ -13,3 +13,4 @@ cryptography
 resampy
 audioop-lts
 psutil
+uvicorn[standard]
