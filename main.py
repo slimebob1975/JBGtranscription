@@ -20,7 +20,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import secrets
 from io import BytesIO
 
-logger = JBGLogger(level="INFO").logger
+logger = JBGLogger(level="DEBUG").logger
 
 try:
     app = FastAPI()
@@ -118,7 +118,9 @@ class FrameOptionsMiddleware(BaseHTTPMiddleware):
     
 # Allow embedding via iframes
 load_dotenv()
-FRAME_ANCESTORS = os.getenv("FRAME_ANCESTORS", "*") 
+FRAME_ANCESTORS = os.getenv("FRAME_ANCESTORS", "*")
+if not FRAME_ANCESTORS or FRAME_ANCESTORS == "*":
+    logger.warning("⚠️ Warning: Using default FRAME_ANCESTORS='*'. Set in .env (localhost) or Azure App Settings (deployed).")
 app.add_middleware(FrameOptionsMiddleware)
 
 # To find and log the current user
