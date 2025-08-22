@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 import os
+from dotenv import load_dotenv
 import sys
 import shutil
 import uuid
@@ -112,10 +113,12 @@ class FrameOptionsMiddleware(BaseHTTPMiddleware):
         if "x-frame-options" in response.headers:
             del response.headers["x-frame-options"]
         # Allow embedding from any origin (use with caution)
-        response.headers["Content-Security-Policy"] = "frame-ancestors https://insidan.iaf.se"        
+        response.headers["Content-Security-Policy"] = f"frame-ancestors {FRAME_ANCESTORS}"    
         return response
     
 # Allow embedding via iframes
+load_dotenv()
+FRAME_ANCESTORS = os.getenv("FRAME_ANCESTORS", "*") 
 app.add_middleware(FrameOptionsMiddleware)
 
 # To find and log the current user
