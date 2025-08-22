@@ -1,6 +1,7 @@
 from fastapi import FastAPI, File, UploadFile, BackgroundTasks, Form, Request, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 import os
 import sys
 import shutil
@@ -29,7 +30,6 @@ except Exception as e:
 UPLOAD_FOLDER = "uploads"
 RESULTS_FOLDER = "results"
 DEVICE = "gpu" if torch.cuda.is_available() else "cpu"
-OPENAI_API_KEYS_FILE = Path.cwd() / Path("./src/keys/openai_api_keys.json")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.chmod(UPLOAD_FOLDER, 0o777)
 os.makedirs(RESULTS_FOLDER, exist_ok=True)
@@ -105,6 +105,18 @@ def decrypt_transcription_file_if_needed(result_path: str, encryption_key: str) 
             logger.error(f"Reading plaintext transcription failed: {e}")
             raise HTTPException(status_code=500, detail="Could not read transcription file.")
 
+class FrameOptionsMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response: Response = await call_next(request)
+        # Remove 'x-frame-options' if it exists (case-insensitive)
+        if "x-frame-options" in response.headers:
+            del response.headers["x-frame-options"]
+        # Allow embedding from any origin (use with caution)
+        response.headers["Content-Security-Policy"] = "frame-ancestors https://insidan.iaf.se"        
+        return response
+    
+# Allow embedding via iframes
+app.add_middleware(FrameOptionsMiddleware)
 
 # To find and log the current user
 @app.get("/me")
