@@ -8,9 +8,6 @@ apt-get install -y ffmpeg
 echo "[INFO] Installed version:"
 ffmpeg -version
 
-# Om en del paket saknas, installera dem här
-pip install uvicorn[standard]
-
 # Starta appen
 echo "[INFO] Starting JBGtranscription API via Gunicorn"
 
