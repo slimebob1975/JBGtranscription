@@ -8,7 +8,10 @@ apt-get install -y ffmpeg
 echo "[INFO] Installed version:"
 ffmpeg -version
 
-# Installera Whisper-modellen i fallback om inte cache finns (valfritt)
+# Om en del paket saknas, installera dem här
+pip install -r .\requirements.txt
+
+# Starta appen
 echo "[INFO] Starting JBGtranscription API via Gunicorn"
 
 # Kör med 4 workers och uvicorn workers
