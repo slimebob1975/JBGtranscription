@@ -9,7 +9,7 @@ echo "[INFO] Installed version:"
 ffmpeg -version
 
 # Om en del paket saknas, installera dem här
-pip install -r .\requirements.txt
+pip install -r requirements.txt
 
 # Starta appen
 echo "[INFO] Starting JBGtranscription API via Gunicorn"
