@@ -26,11 +26,14 @@ jobs:
 
       - name: Create and start virtual environment
         run: |
-          python -m venv venv
-          source venv/bin/activate
+          python -m venv /home/site/venv
+          source /home/site/venv/bin/activate
       
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install --no-cache-dir -r requirements.txt
+
+      - name: Clean temp files
+        run: rm -rf /tmp/*
         
       # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
 
