@@ -18,7 +18,7 @@
         </header>
         
         <!-- File selector -->
-        <input type="file" id="audioFile" accept=".mp3,audio/mpeg">
+        <input type="file" id="audioFile" accept=".mp3,audio/mpeg" title="Ladda upp .mp3-fil">
         <label>
             <input type="checkbox" id="enableEncryption" checked>
             Använd kryptering (rekommenderas)
@@ -62,12 +62,14 @@
         
         <!-- Display transcription text -->
         <!-- Scrollable textarea for transcription output -->
-        <textarea id="result" readonly></textarea>
+        <textarea id="result" title="Resultat" readonly></textarea>
 
         <!-- Download Transcription -->
         <a id="downloadLink" href="#" download>Ladda ner transkriberingen</a>
 
     </div> <!-- Wrapper -->
-
+    
+    <!-- For iframe to work -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/iframe-resizer/4.3.2/iframeResizer.contentWindow.min.js"></script>
 </body>
 </html>
