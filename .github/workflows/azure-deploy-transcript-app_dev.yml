@@ -26,8 +26,8 @@ jobs:
 
       - name: Create and start virtual environment
         run: |
-          python -m venv /home/site/venv
-          source /home/site/venv/bin/activate
+          python -m venv venv
+          source venv/bin/activate
       
       - name: Install dependencies
         run: pip install --no-cache-dir -r requirements.txt
