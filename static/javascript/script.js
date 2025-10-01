@@ -2,6 +2,13 @@
 let globalEncryptionKeyBase64 = null;
 let encryptionEnabled = true;
 
+fetch("/config")
+  .then(res => res.json())
+  .then(data => {
+    document.title = data.title;
+    document.getElementById("app-title").innerText = data.title;
+  })
+
 document.addEventListener("DOMContentLoaded", () => {
     const savedKey = localStorage.getItem("openai_api_key");
     if (savedKey) {
