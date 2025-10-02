@@ -123,6 +123,12 @@ if not FRAME_ANCESTORS or FRAME_ANCESTORS == "*":
     logger.warning("⚠️ Warning: Using default FRAME_ANCESTORS='*'. Set in .env (localhost) or Azure App Settings (deployed).")
 app.add_middleware(FrameOptionsMiddleware)
 
+@app.get("/config")
+def get_config():
+    title = os.getenv("APP_TITLE", "JBG Transkribering")
+    logger.info(f" Appens titel: {title}")
+    return {"title": title}
+
 # To find and log the current user
 @app.get("/me")
 def get_user(request: Request):
