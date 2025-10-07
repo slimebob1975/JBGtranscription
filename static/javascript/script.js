@@ -7,6 +7,13 @@ fetch("/config")
   .then(data => {
     document.title = data.title;
     document.getElementById("app-title").innerText = data.title;
+    const checkbox = document.getElementById('enableEncryption');
+    if (data.encryption_is_optional === "1") {
+      checkbox.disabled = false;
+    } else {
+      checkbox.checked = true;
+      checkbox.disabled = true;
+    }
   });
 
 document.addEventListener("DOMContentLoaded", () => {

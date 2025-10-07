@@ -127,7 +127,9 @@ app.add_middleware(FrameOptionsMiddleware)
 def get_config():
     title = os.getenv("APP_TITLE", "JBG Transkribering")
     logger.info(f" Appens titel: {title}")
-    return {"title": title}
+    encryption_is_optional = os.getenv("ENCRYPTION_IS_OPTIONAL", "1")
+    logger.info(f" Kryptering är tillval: {encryption_is_optional}")
+    return {"title": title, "encryption_is_optional": encryption_is_optional}
 
 # To find and log the current user
 @app.get("/me")
