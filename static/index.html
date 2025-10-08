@@ -20,16 +20,16 @@
         <!-- File selector -->
         <input type="file" id="audioFile" accept=".mp3,audio/mpeg" title="Ladda upp .mp3-fil">
         <label>
-            <input type="checkbox" id="enableEncryption" checked>
+            <input type="checkbox" id="enableEncryption" title="Tillser att din ljudfil inte sparas okrypterad" checked>
             Använd kryptering (rekommenderas)
         </label><br><br> 
 
         <!-- Display checkboxes for OpenAI API call options -->
         <fieldset style="margin-top: 1rem;" id="ai-options">
-            <legend><h4>Lägg till AI-baserad analys</h4></legend>
-            <label for="apiKey">OpenAI API-nyckel:</label><br>
+            <legend><h4>Lägg till OpenAI-baserad textanalys</h4></legend>
+            <label for="apiKey" title="Ett lösenord du får av lokalsamordnaren, se lathunden">Skriv in din API-nyckel:</label><br>
             <input type="password" id="apiKey" placeholder="sk-..." style="width: 100%; max-width: 400px;"><br><br>
-            <label for="modelSelect">Välj modell:</label><br>
+            <label for="modelSelect" title="Nyare modeller ger bättre prestanda men kostar mer att använda">Välj språkmodell för analysen:</label><br>
             <select id="modelSelect" style="width: 100%; max-width: 400px;">
                 <option value="gpt-5">gpt-5 - Nyaste flaggskeppsmodellen, dyrare</option>
                 <option value="gpt-5-mini">gpt-5-mini - Medeldyr variant av gpt-5</option>
@@ -39,14 +39,15 @@
                 <option value="gpt-3.5-turbo">gpt-3.5-turbo – Snabbast och billigast, men mindre exakt</option>
                 <!--option value="gpt-4.5-preview">gpt-4.5-preview – Experimentell förlaga</option-->
             </select><br><br>
-            <label><input type="checkbox" id="optSummary"> Generera sammanfattning</label>
+            <label>Ange vilken textanalys du vill göra:</label><br>
+            <label><input type="checkbox" id="optSummary" title="Genererar en sammanfattning i stil med Chat-GPT"> Generera sammanfattning</label>
             <div id="summaryOptions" style="margin-left: 1rem; display: none;">
                 <label><input type="radio" name="summaryStyle" value="short" checked> Enkel</label>
                 <label><input type="radio" name="summaryStyle" value="extensive"> Utförlig</label>
             </div><br>
-            <label><input type="checkbox" id="optSuspicious"> Markera misstänkta fel i transkriberingen</label><br>
-            <label><input type="checkbox" id="optQuestions"> Föreslå följdfrågor baserat på innehållet</label><br>
-            <label><input type="checkbox" id="optSpeakers"> Identifiera olika talare baserat på innehåll (beta)</label>
+            <label><input type="checkbox" id="optSuspicious" title="Markerar misstänkta transkriberingsfel mellan taggarna [FEL?] och [/FEL?]"> Markera misstänkta fel i transkriberingen</label><br>
+            <label><input type="checkbox" id="optQuestions" title="Genererar förslag på uppföljningsfrågor baserat på den transkriberade texten"> Föreslå följdfrågor baserat på innehållet</label><br>
+            <label><input type="checkbox" id="optSpeakers" title="Försöker dela upp texten mellan olika talare baserat på ordförråd, etc."> Identifiera olika talare baserat på innehåll (beta)</label>
         </fieldset>
         
         <!-- Display button for uploading file -->
