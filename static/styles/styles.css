@@ -1,55 +1,69 @@
+/* === Grundläggande inställningar === */
 body {
-    font-family: Arial, sans-serif;
-    background-color: #f8f9fa;
+    /* font-family: Arial, sans-serif;  */ /* Tidigare */
+    font-family: "Open Sans", Arial, sans-serif;
+    /* background-color: #f8f9fa; */ /* Tidigare */
+    background-color: #f2f2f2;
     color: #333;
     margin: 0;
     padding: 2rem;
 }
 
+/* === Wrapper === */
 #wrapper {
     background-color: #fff;
     padding: 2rem;
     border-radius: 8px;
-    box-shadow: 0 0 6px rgba(0,0,0,0.1);
+    /* box-shadow: 0 0 6px rgba(0,0,0,0.1); */ /* Tidigare */
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
     max-width: 600px;
     margin: 0 auto;
 }
 
+/* === Rubriker === */
 h1 {
-    color: #2979be;
+    /* color: #2979be; */ /* Tidigare */
+    color: #005293; /* IAF-blå */
     margin-bottom: 0.5rem;
 }
 
 h3 {
     font-weight: normal;
+    /* color: #444; */ /* Behålls */
     color: #444;
     margin-bottom: 1.5rem;
 }
 
-/* Upload section */
+/* === Filuppladdning === */
 input[type="file"] {
     margin-bottom: 1rem;
 }
 
+/* === Knappar === */
 button {
     padding: 10px 20px;
-    background-color: #2979be;
+    /* background-color: #2979be; */ /* Tidigare */
+    background-color: #005293;
     color: white;
     border: none;
     border-radius: 4px;
     font-size: 14px;
     cursor: pointer;
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 button:hover {
-    background-color: #1c6fa1;
+    /* background-color: #1c6fa1; */ /* Tidigare */
+    background-color: #003e73;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
 }
 
-/* Status and output */
+/* === Statusfält och val === */
 #status {
     margin: 1rem 0;
     font-weight: bold;
-    color: #2979be;
+    /* color: #2979be; */ /* Tidigare */
+    color: #005293;
 }
 
 #modelSelect {
@@ -58,16 +72,18 @@ button:hover {
     border-radius: 4px;
 }
 
+/* === Sektion för AI-val === */
 #ai-options {
     padding: 1rem;
-    border: 1px solid #ccc;
+    border: 1px solid #ddd;
     border-radius: 6px;
-    background-color: #f9f9f9;
+    /* background-color: #f9f9f9; */ /* Tidigare */
+    background-color: #fafafa;
     max-width: 500px;
     margin-bottom: 1.5rem;
 }
 
-
+/* === Resultat === */
 #result {
     font-family: monospace;
     width: 100%;
@@ -78,41 +94,47 @@ button:hover {
     resize: vertical;
     display: none;
     background-color: #fff;
-    box-shadow: 0 0 6px rgba(0,0,0,0.08);
+    /* box-shadow: 0 0 6px rgba(0,0,0,0.08); */ /* Tidigare */
+    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
 }
 
-/* Download link */
+/* === Nedladdningslänk === */
 #downloadLink {
     margin-top: 1rem;
     display: none;
     font-size: 14px;
     text-decoration: none;
-    color: #2979be;
-    border: 1px solid #2979be;
+    /* color: #2979be; */ /* Tidigare */
+    color: #005293;
+    border: 1px solid #005293;
     padding: 6px 12px;
     border-radius: 4px;
+    transition: all 0.2s ease;
 }
 
 #downloadLink:hover {
-    background-color: #D0E4F5;
+    /* background-color: #D0E4F5; */ /* Tidigare */
+    background-color: #e6eff7;
 }
 
-/* Hourglass Spinner */
+/* === Laddningssymbol === */
 .spinner {
     border: 8px solid #f3f3f3;
-    border-top: 8px solid green;
+    /* border-top: 8px solid green; */ /* Tidigare */
+    border-top: 8px solid #005293;
     border-radius: 50%;
     width: 40px;
     height: 40px;
     animation: spin 1s linear infinite;
     margin: auto;
 }
+
 @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
 }
 
-/* Center Spinner */
+/* === Centrering av spinner === */
 #spinner-container {
     display: none;
     text-align: center;
