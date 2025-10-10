@@ -61,6 +61,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
 // ✅ Upload handler
 async function uploadFile() {
+
+    // Disable inputs
+    document.getElementById("enableEncryption").disabled = true;
+    document.getElementById("apiKey").disabled = true;
+    document.getElementById("modelSelect").disabled = true;
+    document.getElementById("optSummary").disabled = true;
+    document.getElementById("optSuspicious").disabled = true;
+    document.getElementById("optQuestions").disabled = true;
+    document.getElementById("optSpeakers").disabled = true;
+    document.getElementById("button").disabled = true;
+
+    // Take care of data
     const fileInput = document.getElementById("audioFile");
     if (fileInput.files.length === 0) {
         alert("Please select a file.");
@@ -122,6 +134,8 @@ async function uploadFile() {
     formData.append("questions", document.getElementById("optQuestions").checked);
     formData.append("speakers", document.getElementById("optSpeakers").checked);
 
+    fileInput.disabled = true;
+
     // Check Formdata for errors.
     for (const [key, value] of formData.entries()) {
         // Om värdet är en Blob (fil), visa namn och typ
@@ -131,14 +145,6 @@ async function uploadFile() {
             console.log(`${key}: ${value}`);
         }
     }
-    
-    // Disable inputs
-    fileInput.disabled = true;
-    document.getElementById("button").disabled = true;
-    document.getElementById("optSummary").disabled = true;
-    document.getElementById("optSuspicious").disabled = true;
-    document.getElementById("optQuestions").disabled = true;
-    document.getElementById("optSpeakers").disabled = true;
 
     // Store API key locally
     localStorage.setItem("openai_api_key", document.getElementById("apiKey").value.trim());
