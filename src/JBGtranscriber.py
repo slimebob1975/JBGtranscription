@@ -34,7 +34,7 @@ GPT_5_TEMPERATURE = 1.0
 # Resampling target rate
 RESAMPLING_TARGET_RATE = 16000
 
-logger = JBGLogger(level="INFO").logger
+logger = JBGLogger(level="DEBUG").logger
     
 class JBGtranscriber():
     
