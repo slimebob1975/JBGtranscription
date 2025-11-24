@@ -175,6 +175,7 @@ async function checkStatus(file_id) {
         try {
             const url = `/transcription/${file_id}?encryption_key=${encodeURIComponent(globalEncryptionKeyBase64 || "")}`;
             const response = await fetch(url);
+            console.info(response)
 
             let result;
             try {
