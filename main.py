@@ -259,42 +259,39 @@ async def get_transcription(file_id: str, encryption_key: str = ""):
     result_path = os.path.join(RESULTS_FOLDER, file_id + ".mp3.txt")
     job = jobs.get(file_id)
 
-    # Okänt jobb
-    if job is None and not os.path.exists(result_path):
-        raise HTTPException(status_code=404, detail="Transkriberingsjobb hittades inte.")
-
-    # Om ett fel registrerats
-    if job is not None and job.get("error"):
-        return JSONResponse(
-            {
-                "done": True,
-                "status": job.get("status") or "Ett fel uppstod vid transkriberingen.",
-                "error": job["error"],
-            },
-            status_code=500,
-        )
-
-    # Transkriberingen är inte klar ännu (filen finns inte)
+    # If file does not exist yet → still processing
     if not os.path.exists(result_path):
-        status = job.get("status") if job else "Processar..."
+        # If job exists → show its status
+        if job is not None:
+            return JSONResponse(
+                {
+                    "done": False,
+                    "status": job.get("status") or "Processar...",
+                },
+                status_code=202,
+            )
+
+        # If job does NOT exist → probably another instance is handling it
         return JSONResponse(
             {
                 "done": False,
-                "status": status,
+                "status": "Processar...",
             },
             status_code=202,
         )
 
-    # Klar: läs (och ev. dekryptera) resultatet
+    # If file exists, we treat it as finished.
     content = decrypt_transcription_file_if_needed(result_path, encryption_key)
+
+    # If job exists → use its final message
     if job is not None:
-        job["done"] = True
-        if not job.get("status"):
-            job["status"] = "Transkribering avslutad."
+        final_status = job.get("status") or "Transkribering avslutad."
+    else:
+        final_status = "Transkribering avslutad."
 
     return {
         "done": True,
-        "status": job.get("status") if job else "Transkribering avslutad.",
+        "status": final_status,
         "transcription": content,
     }
 
