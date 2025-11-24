@@ -36,45 +36,91 @@ os.chmod(UPLOAD_FOLDER, 0o777)
 os.makedirs(RESULTS_FOLDER, exist_ok=True)
 os.chmod(RESULTS_FOLDER, 0o777)
 
+# In-memory job status store: file_id -> dict
+jobs = {}
+
 # Function to transcribe in the background
-def transcribe_audio(file_path: str, encryption_key: str, result_path: str, device: str, api_key:str, openai_model: str, \
-    summarize: bool, summary_style: str, suspicious: bool, questions: bool, speakers: bool):
-    
+def transcribe_audio(
+    file_id: str,
+    file_path: str,
+    encryption_key: str,
+    result_path: str,
+    device: str,
+    api_key: str,
+    openai_model: str,
+    summarize: bool,
+    summary_style: str,
+    suspicious: bool,
+    questions: bool,
+    speakers: bool,
+):
     logger.info(f"Transcribe audio was called with encryption key: {encryption_key != ''}")
     if encryption_key:
         secure_handler = SecureFileHandler(encryption_key)
     else:
         secure_handler = None
 
-    transcriber = JBGtranscriber.JBGtranscriber(Path(file_path), Path(result_path), device=device, \
-        api_key=api_key, openai_model = openai_model, secure_handler = secure_handler)
-    
+    # Ensure there is a job entry
+    jobs.setdefault(file_id, {
+        "status": "Transkribering initieras...",
+        "done": False,
+        "error": None,
+    })
+
+    def progress_callback(message: str):
+        job = jobs.get(file_id)
+        if job is not None:
+            job["status"] = message
+
+    transcriber = JBGtranscriber.JBGtranscriber(
+        Path(file_path),
+        Path(result_path),
+        device=device,
+        api_key=api_key,
+        openai_model=openai_model,
+        secure_handler=secure_handler,
+    )
+
     if secure_handler:
         audio_stream = secure_handler.decrypt_file_to_memory(file_path)
     else:
         audio_stream = None
     transcriber.audio_stream = audio_stream
-    
+
     try:
         transcriber.perform_transcription_steps(
-        generate_summary=summarize,
-        summary_style=summary_style,
-        find_suspicious_phrases=suspicious,
-        suggest_follow_up_questions=questions,
-        analyze_speakers=speakers
-    )
-        # 🔥 Radera krypterad mp3-fil från disk
+            generate_summary=summarize,
+            summary_style=summary_style,
+            find_suspicious_phrases=suspicious,
+            suggest_follow_up_questions=questions,
+            analyze_speakers=speakers,
+            progress_callback=progress_callback,
+        )
+
+        # Radera krypterad mp3-fil från disk
         try:
             os.remove(file_path)
             logger.info(f"Uppladdad ljudfil raderad efter ev. kryptering och transkribering: {file_path}")
         except Exception as e:
             logger.warning(f"Misslyckades med att radera uppladdad ljudfil efter ev. kryptering och transkribering: {file_path}: {e}")
 
+        # Städa gamla transkript
+        clean_up_files(Path(file_path), Path(RESULTS_FOLDER))
+
+        job = jobs.get(file_id)
+        if job is not None:
+            job["done"] = True
+            # keep last progress message if set, otherwise set a default
+            if not job.get("status"):
+                job["status"] = "Transkribering avslutad."
+            job["error"] = None
+
     except Exception as e:
-        return JSONResponse({"Transcription error": str(e)}, status_code=500)
-    else:
-        clean_up_files(Path(file_path), Path(result_path)) 
-        return JSONResponse({"message": "Transcription completed successfully. Audio file deleted."}, status_code=200)
+        logger.error(f"Transcription error: {e}")
+        job = jobs.setdefault(file_id, {})
+        job["done"] = True
+        job["error"] = str(e)
+        job["status"] = "Ett fel uppstod vid transkriberingen."
     
 def clean_up_files(audio_file_path: Path, transcriptions_path: Path):
     
@@ -175,6 +221,13 @@ async def upload_audio(
     file_path = os.path.join(UPLOAD_FOLDER, file_id + (".mp3.encrypted" if encryption_key else ".mp3"))    
     result_path = os.path.join(RESULTS_FOLDER, file_id + ".mp3.txt")
 
+     # Initiera jobbstatus
+    jobs[file_id] = {
+        "status": "Fil uppladdad. Väntar på att transkriberingen ska starta...",
+        "done": False,
+        "error": None,
+    }
+
     if encryption_key:
         logger.info("Krypterad fil sparas...")
     else:
@@ -184,6 +237,7 @@ async def upload_audio(
 
     background_tasks.add_task(
         transcribe_audio,
+        file_id,
         file_path,
         encryption_key,
         result_path,
@@ -203,13 +257,46 @@ async def upload_audio(
 @app.get("/transcription/{file_id}")
 async def get_transcription(file_id: str, encryption_key: str = ""):
     result_path = os.path.join(RESULTS_FOLDER, file_id + ".mp3.txt")
+    job = jobs.get(file_id)
 
+    # Okänt jobb
+    if job is None and not os.path.exists(result_path):
+        raise HTTPException(status_code=404, detail="Transkriberingsjobb hittades inte.")
+
+    # Om ett fel registrerats
+    if job is not None and job.get("error"):
+        return JSONResponse(
+            {
+                "done": True,
+                "status": job.get("status") or "Ett fel uppstod vid transkriberingen.",
+                "error": job["error"],
+            },
+            status_code=500,
+        )
+
+    # Transkriberingen är inte klar ännu (filen finns inte)
     if not os.path.exists(result_path):
-        raise HTTPException(status_code=404, detail="Transkriberingsresultat hittades inte.")
+        status = job.get("status") if job else "Processar..."
+        return JSONResponse(
+            {
+                "done": False,
+                "status": status,
+            },
+            status_code=202,
+        )
 
+    # Klar: läs (och ev. dekryptera) resultatet
     content = decrypt_transcription_file_if_needed(result_path, encryption_key)
-    return {"transcription": content}
+    if job is not None:
+        job["done"] = True
+        if not job.get("status"):
+            job["status"] = "Transkribering avslutad."
 
+    return {
+        "done": True,
+        "status": job.get("status") if job else "Transkribering avslutad.",
+        "transcription": content,
+    }
 
 # Endpoint to download transcription as a file
 @app.get("/download/{file_id}")

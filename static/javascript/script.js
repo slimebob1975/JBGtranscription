@@ -62,16 +62,6 @@ document.addEventListener("DOMContentLoaded", () => {
 // ✅ Upload handler
 async function uploadFile() {
 
-    // Disable inputs
-    document.getElementById("enableEncryption").disabled = true;
-    document.getElementById("apiKey").disabled = true;
-    document.getElementById("modelSelect").disabled = true;
-    document.getElementById("optSummary").disabled = true;
-    document.getElementById("optSuspicious").disabled = true;
-    document.getElementById("optQuestions").disabled = true;
-    document.getElementById("optSpeakers").disabled = true;
-    document.getElementById("button").disabled = true;
-
     // Take care of data
     const fileInput = document.getElementById("audioFile");
     if (fileInput.files.length === 0) {
@@ -84,6 +74,16 @@ async function uploadFile() {
         alert("Only MP3 files are allowed.");
         return;
     }
+
+     // Disable inputs
+    document.getElementById("enableEncryption").disabled = true;
+    document.getElementById("apiKey").disabled = true;
+    document.getElementById("modelSelect").disabled = true;
+    document.getElementById("optSummary").disabled = true;
+    document.getElementById("optSuspicious").disabled = true;
+    document.getElementById("optQuestions").disabled = true;
+    document.getElementById("optSpeakers").disabled = true;
+    document.getElementById("button").disabled = true;
 
     // Prepare data to send for backend
     let formData = new FormData();
@@ -163,38 +163,82 @@ async function uploadFile() {
     }
 }
 
-// ✅ Polling for transcription status
+// ✅ Polling for transcription status – with live step updates
 async function checkStatus(file_id) {
     const spinner = document.getElementById("spinner-container");
     spinner.style.display = "block";
 
     setTimeout(async () => {
         try {
-            // Get decrypted transcription from server
             const url = `/transcription/${file_id}?encryption_key=${encodeURIComponent(globalEncryptionKeyBase64 || "")}`;
             const response = await fetch(url);
 
-            if (!response.ok) {
-                checkStatus(file_id); // Retry
+            let result;
+            try {
+                result = await response.json();
+            } catch (e) {
+                console.error("Kunde inte tolka svar från servern:", e);
+                document.getElementById("status").innerText = "Tekniskt fel vid statuskontroll. Försöker igen...";
+                checkStatus(file_id);
                 return;
             }
 
-            const result = await response.json();
-            const decodedText = result.transcription;
+            // Jobb hittades inte
+            if (response.status === 404) {
+                spinner.style.display = "none";
+                document.getElementById("status").innerText = "Kunde inte hitta transkriberingsjobbet.";
+                console.error("Transcription job not found:", result);
+                return;
+            }
 
-            spinner.style.display = "none";
-            document.getElementById("status").innerText = "Transkribering avslutad.";
-            document.getElementById("result").value = decodedText;
-            document.getElementById("result").style.display = "inline";
+            // Fel på serversidan
+            if (result.error) {
+                spinner.style.display = "none";
+                document.getElementById("status").innerText =
+                    result.status || "Ett fel uppstod vid transkriberingen.";
+                console.error("Transcription error from server:", result.error);
+                return;
+            }
 
-            // Create a Blob and download link for the result
-            const textBlob = new Blob([decodedText], { type: "text/plain" });
-            const urlBlob = URL.createObjectURL(textBlob);
-            document.getElementById("downloadLink").href = urlBlob;
-            document.getElementById("downloadLink").style.display = "inline";
+            // Inte klar ännu
+            if (result.done === false) {
+                if (result.status) {
+                    document.getElementById("status").innerText = result.status;
+                } else {
+                    document.getElementById("status").innerText = "Processar...";
+                }
+                // Poll again
+                checkStatus(file_id);
+                return;
+            }
+
+            // Klar och lyckad
+            if (result.done === true) {
+                spinner.style.display = "none";
+
+                const statusText = result.status || "Transkribering avslutad.";
+                const decodedText = result.transcription || "";
+
+                document.getElementById("status").innerText = statusText;
+                document.getElementById("result").value = decodedText;
+                document.getElementById("result").style.display = "inline";
+
+                const textBlob = new Blob([decodedText], { type: "text/plain" });
+                const urlBlob = URL.createObjectURL(textBlob);
+                document.getElementById("downloadLink").href = urlBlob;
+                document.getElementById("downloadLink").style.display = "inline";
+
+                return;
+            }
+
+            // Om vi hamnar här är något oväntat med svaret
+            console.warn("Oväntat svar från /transcription:", result);
+            document.getElementById("status").innerText = "Oväntat svar från servern. Försöker igen...";
+            checkStatus(file_id);
         } catch (err) {
             console.error("Fel vid statuskontroll:", err);
+            document.getElementById("status").innerText = "Tekniskt fel vid statuskontroll. Försöker igen...";
             checkStatus(file_id);
         }
-    }, 10000);
+    }, 3000); // Poll var 3:e sekund (justera om du vill)
 }

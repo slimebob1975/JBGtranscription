@@ -31,6 +31,13 @@ OVERLAP_TOKENS = 300
 DEFAULT_TEMPERATURE = 0.7
 GPT_5_TEMPERATURE = 1.0
 
+# Extra model options
+EXTRA_MODEL_OPTIONS = {
+    "gpt-5.1": {
+        "reasoning_effort": "none",
+    },
+}
+
 # Resampling target rate
 RESAMPLING_TARGET_RATE = 16000
 
@@ -157,6 +164,21 @@ class JBGtranscriber():
             return GPT_5_TEMPERATURE
         except ValueError as ex:
             return temperature
+        
+    @staticmethod
+    def get_model_specific_extra_arguments(gpt_model):
+        return EXTRA_MODEL_OPTIONS.get(gpt_model, {})
+    
+    def _get_encoder_for_segmentation(self):
+        try:
+            return tiktoken.encoding_for_model(self.openai_model)
+        except Exception:
+            # Fallback for new / unknown models (e.g. gpt-5.*)
+            logger.warning(
+                f"tiktoken.encoding_for_model('{self.openai_model}') failed, "
+                "falling back to o200k_base encoding."
+            )
+            return tiktoken.get_encoding("o200k_base")
 
     def get_transcription_cache_path(self):
         """Generate a cache filename based on the audio file's full path (hashed)."""
@@ -167,8 +189,11 @@ class JBGtranscriber():
     
     def call_openai_simple(self, prompt):
         """Anropar OpenAI:s GPT-modell med en given prompt."""
+        # TODO: Consider adding reasoning_effort='none' for gpt-5.1 to get GPT-5.1-level intelligence with ultra-low latency.
         
         client = openai.OpenAI(api_key=self.api_key)
+
+        extra_args = JBGtranscriber.get_model_specific_extra_arguments(self.openai_model)
 
         completion = client.chat.completions.create(
             model= self.openai_model,
@@ -176,15 +201,20 @@ class JBGtranscriber():
                 {"role": "developer", "content": "Du är en expert på transkriberingar av ljudfiler från exempelvis intervjuer."},
                 {"role": "user", "content": prompt},
             ],
-            temperature = JBGtranscriber.get_permitted_temperature(self.openai_model, DEFAULT_TEMPERATURE)
+            temperature = JBGtranscriber.get_permitted_temperature(self.openai_model, DEFAULT_TEMPERATURE),
+            **extra_args,
         )
 
         return completion.choices[0].message
     
     def call_openai(self, instructions, input_message):
         """Anropar OpenAI:s GPT-modell med en given prompt."""
+        # TODO: Consider adding reasoning_effort='none' for gpt-5.1 to get GPT-5.1-level intelligence with ultra-low latency.
         
         client = openai.OpenAI(api_key=self.api_key)
+
+        extra_args = JBGtranscriber.get_model_specific_extra_arguments(self.openai_model)
+        logger.info(f"[INFO] Extra args for openai model {self.openai_model}: {str(extra_args)}")
 
         completion = client.chat.completions.create(
             model=self.openai_model,
@@ -192,7 +222,8 @@ class JBGtranscriber():
                 {"role": "system", "content": instructions},
                 {"role": "user", "content": input_message},
             ],
-            temperature = JBGtranscriber.get_permitted_temperature(self.openai_model, DEFAULT_TEMPERATURE)
+            temperature = JBGtranscriber.get_permitted_temperature(self.openai_model, DEFAULT_TEMPERATURE),
+             **extra_args,
         )
 
         return completion.choices[0].message
@@ -215,14 +246,18 @@ class JBGtranscriber():
                 
     def generate_summary_splitted(self):
 
-        logger.info(f"[INFO] Starting segmented summary generation...")
+        logger.info(f"Starting segmented summary generation...")
 
-        enc = tiktoken.encoding_for_model(self.openai_model)
+        enc = self._get_encoder_for_segmentation()
+        logger.debug(f"Investigated tiktoken encoding...")
 
         segments = self._split_into_segments(self.transcription, enc)
+        logger.debug(f"Split text into segments...")
 
         prompt_lines = self.prompt_policy.get("extensive_summary", ["Sammanfatta detta:"])
+
         instructions = "\n".join(prompt_lines)
+        logger.debug(f"Prompt instructions=",instructions)
 
         partial_summaries = []
 
@@ -297,7 +332,7 @@ class JBGtranscriber():
     def do_analyze_speakers_splitted(self):
         
         # Setup encoder for model
-        enc = tiktoken.encoding_for_model(self.openai_model)
+        enc = self._get_encoder_for_segmentation()
         
         segments = self._split_into_segments(self.transcription, enc)
         
@@ -322,8 +357,8 @@ class JBGtranscriber():
                 self.analyze_speakers = ("\n\n".join(diarized_segments))
             except Exception as e:
                 logger.error(f"An error occurred while analyzing speakers: {e}")
-                self.analyze_speakers = "Försöket till identifiering av talare misslyckades"
-             
+                self.analyze_speakers = "Försöket till identifiering av talare misslyckades"        
+    
     # Some internal help functions
     def _tokenize(self, text, enc):
         return enc.encode(text)
@@ -555,43 +590,51 @@ class JBGtranscriber():
         summary_style="short",
         find_suspicious_phrases=False,
         suggest_follow_up_questions=False,
-        analyze_speakers=False
+        analyze_speakers=False,
+        progress_callback=None
     ):
         """Perform all transcription steps"""
         
+        def report(msg):
+            logger.info(msg)
+            if progress_callback is not None:
+                try:
+                    progress_callback(msg)
+                except Exception as e:
+                    logger.error(f"Progress callback failed: {e}")
+
         # Transcribe the audio files
+        report("Transkriberar ljudfilen...")
         self.transcribe()
         
         # Generate a summary if requested
         if generate_summary:
-            logger.info(f"Generating summary")
+            report(f"Genererar sammanfattning...")
             self.generate_summary(style=summary_style)
-            logger.info(f"Summary generated successfully.")
         
         # Find and mark suspicious phrases if requested
         if find_suspicious_phrases:
-            logger.info(f"Finding suspicious phrases")
+            report(f"Letar misstänkta fel...")
             self.find_suspicious_phrases()
-            logger.info(f"Suspicious phrases found successfully.")
         
         # Suggest follow-up questions if requested
         if suggest_follow_up_questions:
-            logger.info(f"Suggesting follow-up questions")
+            report(f"Föreslår uppföljningsfrågor...")
             self.suggest_follow_up_questions()
-            logger.info(f"Follow-up questions suggested successfully.")
             
         # Analyze speakers if requested
         if analyze_speakers:
-            logger.info(f"Analyzing speakers")
+            report(f"Försöker identifiera olika talare...")
             #self.do_analyze_speakers()
             self.do_analyze_speakers_splitted()
-            logger.info(f"Speakers analyzed successfully.")
         
         # Print a message confirming successful completion
-        logger.info(f"All transcription steps completed successfully.")
+        report(f"Alla steg i analysen genomfördes.")
             
         # Write the transcription results to an output file
+        report(f"Spara resultatet till fil...")
         self.write_to_output_file()
+        report(f"Transkribering avslutad.")
 
 def check_script_arguments():
     """Check command-line arguments for the test script""" 
