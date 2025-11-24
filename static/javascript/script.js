@@ -75,6 +75,9 @@ async function uploadFile() {
         return;
     }
 
+    // Update status
+    document.getElementById("status").innerText = "Filen laddas upp...-v.g. vänta!";
+
      // Disable inputs
     document.getElementById("enableEncryption").disabled = true;
     document.getElementById("apiKey").disabled = true;
