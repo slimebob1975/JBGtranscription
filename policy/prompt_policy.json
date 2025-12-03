@@ -22,8 +22,9 @@
     "Här nedan följer transkriberingen:\\n"
     ],
     "suspicious_phrases": [
-        "I följande transkribering, identifiera och markera tveksamma eller osannolika ordkombinationer som kan bero",
-        "på fel i transkriberingen. Markera misstänkta fel genom att omsluta dem med markörerna [FEL?] och [/FEL?]:"
+        "I följande transkribering, identifiera och markera tveksamma eller osannolika meningar och/eller ordkombinationer ",
+        "som kan bero på fel i transkriberingen. Markera misstänkta fel genom att lägga till ditt förslag till mest sannolik ",
+        "ersättningstext inom '(Kanske: )' och omsluta det misstänkta felet och ditt förslag med markörerna [FEL?] och [/FEL?] "
     ],
     "speaker_diarization": [
         "Du får en rå, odelad transkribering av en intervju med en eller flera intervjuare",
