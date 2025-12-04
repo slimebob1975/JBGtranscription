@@ -57,8 +57,8 @@ class JBGtranscriber():
     "KBLab/kb-whisper-large": 6.0,
     "KBLab/kb-whisper-medium": 4.0,
     "KBLab/kb-whisper-small": 2.5,
-    "KBLab/kb-whisper-base": 2.0,
-    "KBLab/kb-whisper-tiny": 1.5,
+    "KBLab/kb-whisper-base": 1.5,
+    "KBLab/kb-whisper-tiny": 1.0,
     }
     TRANSCRIBER_MODEL_DEFAULT = TRANSCRIBER_MODEL_CANDIDATES[0]
     CACHE_DIR = "kb-whisper-cache"
@@ -431,14 +431,19 @@ class JBGtranscriber():
     
     @staticmethod
     def _enough_memory(min_gb_required: float = 6.0) -> bool:
+        """Return True if there seems to be enough free RAM to load a model.
+
+        Logs both total and available RAM for debugging purposes.
+        """
         vm = psutil.virtual_memory()
-        available_gb = vm.available / (1024 ** 3)
         total_gb = vm.total / (1024 ** 3)
+        available_gb = vm.available / (1024 ** 3)
         logger.debug(
             f"Memory check: required={min_gb_required:.2f} GB, "
             f"available={available_gb:.2f} GB, total={total_gb:.2f} GB"
         )
         return available_gb >= min_gb_required
+
 
     
     def transcribe(self):
@@ -488,13 +493,26 @@ class JBGtranscriber():
             try:
                 logger.info(f"Trying model: {model_id}")
                 required_ram_gb = self.TRANSCRIBER_MODEL_RAM_REQUIREMENTS.get(model_id, None)
-                if not required_ram_gb:
+
+                if required_ram_gb is None:
                     logger.warning(f"No RAM requirement configured for {model_id}, skipping.")
                     continue
+
                 if not self._enough_memory(required_ram_gb):
-                    logger.warning(f"Skipping model {model_id} -- not enough available RAM (requires {required_ram_gb} GB).")
-                    continue
+                    # Särskilt fall: försök ändå med minsta modellen som sista utväg
+                    if model_id == "KBLab/kb-whisper-tiny":
+                        logger.warning(
+                            "Available RAM verkar inte räcka för KBLab/kb-whisper-tiny, "
+                            "men vi försöker ändå som sista utväg."
+                        )
+                    else:
+                        logger.warning(
+                            f"Skipping model {model_id} -- it is estimated that the available RAM is not enough."
+                        )
+                        continue
+
                 logger.info(f"Estimated RAM requirement for model {model_id}: {required_ram_gb} GB")
+
 
                 model = AutoModelForSpeechSeq2Seq.from_pretrained(
                     model_id, torch_dtype=self.torch_dtype, use_safetensors=True, cache_dir=JBGtranscriber.CACHE_DIR
