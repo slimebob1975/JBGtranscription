@@ -175,27 +175,55 @@ async function checkStatus(file_id) {
         try {
             const url = `/transcription/${file_id}?encryption_key=${encodeURIComponent(globalEncryptionKeyBase64 || "")}`;
             const response = await fetch(url);
-            console.info(response)
+            console.info("HTTP status:", response.status);
 
-            let result;
-            try {
-                result = await response.json();
-            } catch (e) {
-                console.error("Kunde inte tolka svar från servern:", e);
-                document.getElementById("status").innerText = "Tekniskt fel vid statuskontroll. Försöker igen...";
+            // 1) Jobbet pågår → 202 Accepted
+            if (response.status === 202) {
+                let result;
+                try {
+                    result = await response.json();
+                } catch (e) {
+                    console.error("Kunde inte tolka 202-svar från servern:", e);
+                    document.getElementById("status").innerText =
+                        "Tekniskt fel vid statuskontroll. Försöker igen...";
+                    checkStatus(file_id);
+                    return;
+                }
+
+                document.getElementById("status").innerText =
+                    result.status || "Processar...";
+                // Fortsätt polla
                 checkStatus(file_id);
                 return;
             }
 
-            // Jobb hittades inte
-            if (response.status === 404) {
+            // 2) Andra felaktiga HTTP-statusar (4xx, 5xx)
+            if (!response.ok) {
+                const text = await response.text().catch(() => "");
+                console.error(
+                    "Serverfel vid /transcription:",
+                    response.status,
+                    text
+                );
                 spinner.style.display = "none";
-                document.getElementById("status").innerText = "Kunde inte hitta transkriberingsjobbet.";
-                console.error("Transcription job not found:", result);
+                document.getElementById("status").innerText =
+                    `Serverfel (${response.status}). Ett fel uppstod vid transkriberingen.`;
                 return;
             }
 
-            // Fel på serversidan
+            // 3) 200 OK → nu ska vi ha ett färdigt resultat
+            let result;
+            try {
+                result = await response.json();
+            } catch (e) {
+                console.error("Kunde inte tolka 200-svar från servern:", e);
+                document.getElementById("status").innerText =
+                    "Tekniskt fel vid statuskontroll. Försöker igen...";
+                checkStatus(file_id);
+                return;
+            }
+
+            // Extra säkerhet: om backend i framtiden skickar error/done här
             if (result.error) {
                 spinner.style.display = "none";
                 document.getElementById("status").innerText =
@@ -204,14 +232,9 @@ async function checkStatus(file_id) {
                 return;
             }
 
-            // Inte klar ännu
             if (result.done === false) {
-                if (result.status) {
-                    document.getElementById("status").innerText = result.status;
-                } else {
-                    document.getElementById("status").innerText = "Processar...";
-                }
-                // Poll again
+                document.getElementById("status").innerText =
+                    result.status || "Processar...";
                 checkStatus(file_id);
                 return;
             }
@@ -235,14 +258,16 @@ async function checkStatus(file_id) {
                 return;
             }
 
-            // Om vi hamnar här är något oväntat med svaret
+            // Om vi hamnar här är något oväntat
             console.warn("Oväntat svar från /transcription:", result);
-            document.getElementById("status").innerText = "Oväntat svar från servern. Försöker igen...";
+            document.getElementById("status").innerText =
+                "Oväntat svar från servern. Försöker igen...";
             checkStatus(file_id);
         } catch (err) {
             console.error("Fel vid statuskontroll:", err);
-            document.getElementById("status").innerText = "Tekniskt fel vid statuskontroll. Försöker igen...";
+            document.getElementById("status").innerText =
+                "Tekniskt fel vid statuskontroll. Försöker igen...";
             checkStatus(file_id);
         }
-    }, 3000); // Poll var 3:e sekund (justera om du vill)
+    }, 3000);
 }

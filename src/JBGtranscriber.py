@@ -431,8 +431,15 @@ class JBGtranscriber():
     
     @staticmethod
     def _enough_memory(min_gb_required: float = 6.0) -> bool:
-        available_gb = psutil.virtual_memory().available / (1024 ** 3)
-        return available_gb >= min_gb_required    
+        vm = psutil.virtual_memory()
+        available_gb = vm.available / (1024 ** 3)
+        total_gb = vm.total / (1024 ** 3)
+        logger.debug(
+            f"Memory check: required={min_gb_required:.2f} GB, "
+            f"available={available_gb:.2f} GB, total={total_gb:.2f} GB"
+        )
+        return available_gb >= min_gb_required
+
     
     def transcribe(self):
         """Put together the model of choice and do the transcription"""
@@ -481,8 +488,11 @@ class JBGtranscriber():
             try:
                 logger.info(f"Trying model: {model_id}")
                 required_ram_gb = self.TRANSCRIBER_MODEL_RAM_REQUIREMENTS.get(model_id, None)
-                if not required_ram_gb or not self._enough_memory(required_ram_gb):
-                    logger.warning(f"Skipping model {model_id} -- it is estimated that the available RAM is not enough.")
+                if not required_ram_gb:
+                    logger.warning(f"No RAM requirement configured for {model_id}, skipping.")
+                    continue
+                if not self._enough_memory(required_ram_gb):
+                    logger.warning(f"Skipping model {model_id} -- not enough available RAM (requires {required_ram_gb} GB).")
                     continue
                 logger.info(f"Estimated RAM requirement for model {model_id}: {required_ram_gb} GB")
 

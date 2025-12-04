@@ -259,6 +259,17 @@ async def get_transcription(file_id: str, encryption_key: str = ""):
     result_path = os.path.join(RESULTS_FOLDER, file_id + ".mp3.txt")
     job = jobs.get(file_id)
 
+    # Om jobb finns och är markerat som klart med fel → returnera fel
+    if job is not None and job.get("done") and job.get("error"):
+        return JSONResponse(
+            {
+                "done": True,
+                "status": job.get("status") or "Ett fel uppstod vid transkriberingen.",
+                "error": job["error"],
+            },
+            status_code=500,
+        )
+    
     # If file does not exist yet → still processing
     if not os.path.exists(result_path):
         # If job exists → show its status
