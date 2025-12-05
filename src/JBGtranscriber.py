@@ -430,7 +430,11 @@ class JBGtranscriber():
         logger.info(f" Transcription and timestamps cached as: {cache_file.name}")
     
     @staticmethod
-    def _enough_memory(min_gb_required: float = 6.0, safety_margin_gb: float = 0.5) -> bool:
+    def _enough_memory(min_gb_required: float = 6.0) -> bool:
+        """Return True if there seems to be enough free RAM to load a model.
+
+        Logs both total and available RAM for debugging purposes.
+        """
         vm = psutil.virtual_memory()
         total_gb = vm.total / (1024 ** 3)
         available_gb = vm.available / (1024 ** 3)
@@ -438,8 +442,7 @@ class JBGtranscriber():
             f"Memory check: required={min_gb_required:.2f} GB, "
             f"available={available_gb:.2f} GB, total={total_gb:.2f} GB"
         )
-        return total_gb - min_gb_required >= safety_margin_gb
-
+        return available_gb >= min_gb_required
     
     def transcribe(self):
         """Put together the model of choice and do the transcription"""
