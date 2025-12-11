@@ -14,6 +14,7 @@ try:
     import io
     import numpy as np
     import resampy
+    import difflib
 except ModuleNotFoundError as ex:
     sys.exit("You probably need to install some missing modules:" + str(ex))
 from src.JBGLogger import JBGLogger
@@ -334,7 +335,20 @@ class JBGtranscriber():
         # Setup encoder for model
         enc = self._get_encoder_for_segmentation()
         
-        segments = self._split_into_segments(self.transcription, enc)
+        # Tokenize once to decide if we actually need to segment
+        tokens = self._tokenize(self.transcription, enc)
+
+        if len(tokens) <= MAX_INPUT_TOKENS:
+            # Allt får plats i ett enda segment – använd enkel-varianten
+            segments = [self.transcription]
+        else:
+            # För talaranalys vill vi undvika överlappade segment för att slippa duplikationer
+            segments = self._split_into_segments(
+                self.transcription,
+                enc,
+                max_tokens=MAX_INPUT_TOKENS,
+                overlap=0,  # viktigt: ingen överlapp för diarization
+            )
         
         # No need to split text into segments
         if len(segments) == 1:
@@ -348,24 +362,61 @@ class JBGtranscriber():
 
             try:
                 for i, segment in enumerate(segments):
-                    if i>0: 
-                        time.sleep(5)  # undvik rate limit for multiple API calls
+                    if i > 0:
+                        time.sleep(5)  # undvik rate limit för multiple API calls
+
                     logger.info(f"Bearbetar segment {i+1}/{len(segments)}...")
                     context = f"\nDetta är del {i+1}. Fortsätt numrera talare konsekvent.\n"
-                    diarized = self.call_openai(instructions=prompt+context, input_message=segment).content
+                    diarized = self.call_openai(
+                        instructions=prompt + context,
+                        input_message=segment
+                    ).content
                     diarized_segments.append(diarized)
-                self.analyze_speakers = ("\n\n".join(diarized_segments))
+
+                # Slå ihop och städa bort uppenbara upprepningar
+                raw_diarization = "\n\n".join(diarized_segments)
+                self.analyze_speakers = self._deduplicate_blocks(raw_diarization)
+
             except Exception as e:
                 logger.error(f"An error occurred while analyzing speakers: {e}")
-                self.analyze_speakers = "Försöket till identifiering av talare misslyckades"        
-    
-    # Some internal help functions
+                self.analyze_speakers = "Försöket till identifiering av talare misslyckades"
+     
+     # Some internal help functions
     def _tokenize(self, text, enc):
         return enc.encode(text)
 
     def _detokenize(self, tokens, enc):
         return enc.decode(tokens)
     
+    def _deduplicate_blocks(self, text, similarity_threshold=0.9, min_length=200):
+        """
+        Ta bort uppenbara längre upprepningar mellan närliggande block i en text.
+        Används som ett sista städsteg efter talaranalysen för att hantera
+        eventuella duplicerade segment.
+        """
+        text = text.strip()
+        if not text:
+            return text
+
+        # Dela upp texten i block, t.ex. separerade av tomrad
+        blocks = [b.strip() for b in text.split("\n\n") if b.strip()]
+        if not blocks:
+            return ""
+
+        cleaned = []
+        prev = None
+
+        for block in blocks:
+            if prev is not None and len(block) >= min_length and len(prev) >= min_length:
+                ratio = difflib.SequenceMatcher(None, prev, block).ratio()
+                if ratio > similarity_threshold:
+                    # Hoppa över blocket om det är nästan likadant som föregående
+                    continue
+            cleaned.append(block)
+            prev = block
+
+        return "\n\n".join(cleaned)
+
     def _split_into_segments(self, text, enc, max_tokens=MAX_INPUT_TOKENS, overlap=OVERLAP_TOKENS):
         tokens = self._tokenize(text, enc)
         segments = []
@@ -376,6 +427,7 @@ class JBGtranscriber():
             i += max_tokens - overlap
         logger.info(f"Text has {len(tokens)} tokens and results in {len(segments)} segments")
         return segments
+
     
     def transcribe_default(self):
         """Put together the model of choice and do the transcription"""
