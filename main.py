@@ -28,12 +28,14 @@ except Exception as e:
     logger.error(f"FastAPI ERROR:", e, file=sys.stderr)
     raise
 
-UPLOAD_FOLDER = "uploads"
-RESULTS_FOLDER = "results"
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
+UPLOAD_FOLDER = BASE_DIR / "uploads"
+RESULTS_FOLDER = BASE_DIR / "results"
 DEVICE = "gpu" if torch.cuda.is_available() else "cpu"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+UPLOAD_FOLDER.mkdir(exist_ok=True)
 os.chmod(UPLOAD_FOLDER, 0o777)
-os.makedirs(RESULTS_FOLDER, exist_ok=True)
+RESULTS_FOLDER.mkdir(exist_ok=True)
 os.chmod(RESULTS_FOLDER, 0o777)
 
 # In-memory job status store: file_id -> dict
@@ -146,7 +148,7 @@ def decrypt_transcription_file_if_needed(result_path: str, encryption_key: str) 
             raise HTTPException(status_code=500, detail="Could not decrypt transcription file.")
     else:
         try:
-            with open(result_path, "r", encoding="utf-8") as f:
+            with open(str(result_path), "r", encoding="utf-8") as f:
                 return f.read()
         except Exception as e:
             logger.error(f"Reading plaintext transcription failed: {e}")
@@ -218,8 +220,8 @@ async def upload_audio(
           """)
     
     file_id = str(uuid.uuid4())
-    file_path = os.path.join(UPLOAD_FOLDER, file_id + (".mp3.encrypted" if encryption_key else ".mp3"))    
-    result_path = os.path.join(RESULTS_FOLDER, file_id + ".mp3.txt")
+    file_path = UPLOAD_FOLDER / (file_id + (".mp3.encrypted" if encryption_key else ".mp3"))
+    result_path = RESULTS_FOLDER / f"{file_id}.mp3.txt"
 
      # Initiera jobbstatus
     jobs[file_id] = {
@@ -238,9 +240,9 @@ async def upload_audio(
     background_tasks.add_task(
         transcribe_audio,
         file_id,
-        file_path,
+        str(file_path),
         encryption_key,
-        result_path,
+        str(result_path),
         DEVICE,
         api_key,
         model,
@@ -256,7 +258,7 @@ async def upload_audio(
 # Endpoint to get transcription as JSON
 @app.get("/transcription/{file_id}")
 async def get_transcription(file_id: str, encryption_key: str = ""):
-    result_path = os.path.join(RESULTS_FOLDER, file_id + ".mp3.txt")
+    result_path = RESULTS_FOLDER / f"{file_id}.mp3.txt"
     job = jobs.get(file_id)
 
     # Om jobb finns och är markerat som klart med fel → returnera fel
@@ -271,7 +273,7 @@ async def get_transcription(file_id: str, encryption_key: str = ""):
         )
     
     # If file does not exist yet → still processing
-    if not os.path.exists(result_path):
+    if not result_path.exists():
         # If job exists → show its status
         if job is not None:
             return JSONResponse(
@@ -292,7 +294,7 @@ async def get_transcription(file_id: str, encryption_key: str = ""):
         )
 
     # If file exists, we treat it as finished.
-    content = decrypt_transcription_file_if_needed(result_path, encryption_key)
+    content = decrypt_transcription_file_if_needed(str(result_path), encryption_key)
 
     # If job exists → use its final message
     if job is not None:
@@ -315,7 +317,7 @@ async def download_transcription(file_id: str, key: str = ""):
         return JSONResponse({"error": "Transcription not found"}, status_code=404)
 
     try:
-        content = decrypt_transcription_file_if_needed(result_path, key)
+        content = decrypt_transcription_file_if_needed(str(result_path), key)
         stream = BytesIO(content.encode("utf-8"))
         filename = f"{file_id}.txt"
         return StreamingResponse(
@@ -331,7 +333,7 @@ async def download_transcription(file_id: str, key: str = ""):
 # Return the connection with the frontend
 @app.get("/")
 async def serve_home():
-    return FileResponse("static/index.html")
+    return FileResponse(STATIC_DIR / "index.html")
 
 # Ensure FastAPI serves static files (including index.html)
-app.mount("/static", StaticFiles(directory="static", html=True), name="static")
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
