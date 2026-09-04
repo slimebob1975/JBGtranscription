@@ -15,6 +15,9 @@ try:
     import numpy as np
     import resampy
     import difflib
+    import os
+    from docx import Document
+    from docx.shared import Pt
 except ModuleNotFoundError as ex:
     sys.exit("You probably need to install some missing modules:" + str(ex))
 from src.JBGLogger import JBGLogger
@@ -626,42 +629,70 @@ class JBGtranscriber():
         return transcription, transcription_w_timestamps
 
     def write_to_output_file(self):
-        """Write final result to the output file"""
-        
-        if self.secure_handler:
-            logger.info("Sparar transkription krypterat med SecureFileHandler...")
-            full_text = ""
-            full_text += "### Rå transkribering:\n" + self.transcription + "\n\n"
-            full_text += "### Transkribering med tidsstämplar:\n" + self.transcription_w_timestamps + "\n\n"
-            if self.summary:
-                full_text += "### Sammanfattning:\n" + self.summary + "\n\n"
-            if self.marked_text:
-                full_text += "### Transkription med markerade misstänkta fraser:\n" + self.marked_text + "\n\n"
-            if self.follow_up_questions:
-                full_text += "### Uppföljningsfrågor:\n" + self.follow_up_questions + "\n\n"
-            if self.analyze_speakers:
-                full_text += "### Försök till identifiering av olika talare:\n" + self.analyze_speakers + "\n"
+        """Write transcription and selected analyses to a Word document.
 
-            try:
-                self.secure_handler.encrypt_text(full_text, str(self.export_path))
-            except Exception as ex:
-                logger.error(f"Kryptering av transkriptionsfil misslyckades: {str(ex)}")
-        else:
-            try:
-                with open(self.export_path, "w", encoding="utf-8") as export_file:
-                    export_file.write("### Rå transkribering:\n" + self.transcription + "\n\n")
-                    export_file.write("### Transkribering med tidsstämplar:\n" + self.transcription_w_timestamps + "\n\n")
-                    if self.summary:
-                        export_file.write("### Sammanfattning:\n" + self.summary + "\n\n")
-                    if self.marked_text:
-                        export_file.write("### Transkription med markerade misstänkta fraser:\n" + self.marked_text + "\n\n")
-                    if self.follow_up_questions:
-                        export_file.write("### Uppföljningsfrågor:\n" + self.follow_up_questions + "\n\n")
-                    if self.analyze_speakers:
-                        export_file.write("### Försök till identifiering av olika talare:\n" + self.analyze_speakers + "\n")
-            except Exception as ex:
-                logger.error(f"Misslyckades med att spara transkriptionsfil: {str(ex)}")
-            
+        When encryption is enabled, the DOCX package is created only in memory
+        and AES-GCM encrypted before any result bytes are written to disk.
+        """
+
+        encrypted_output = self.secure_handler is not None
+        if encrypted_output:
+            if not self.export_path.name.lower().endswith(".docx.encrypted"):
+                raise ValueError(
+                    f"Encrypted output path must end with .docx.encrypted: {self.export_path}"
+                )
+        elif self.export_path.suffix.lower() != ".docx":
+            raise ValueError(f"Output path must use the .docx extension: {self.export_path}")
+
+        sections = [
+            ("Rå transkribering", self.transcription),
+            ("Transkribering med tidsstämplar", self.transcription_w_timestamps),
+            ("Sammanfattning", self.summary),
+            ("Transkription med markerade misstänkta fraser", self.marked_text),
+            ("Uppföljningsfrågor", self.follow_up_questions),
+            ("Försök till identifiering av olika talare", self.analyze_speakers),
+        ]
+
+        temp_path = self.export_path.with_name(self.export_path.name + ".tmp")
+        try:
+            self.export_path.parent.mkdir(parents=True, exist_ok=True)
+            document = Document()
+            document.add_heading("Transkribering och analys", level=0)
+
+            normal_style = document.styles["Normal"]
+            normal_style.font.name = "Aptos"
+            normal_style.font.size = Pt(11)
+
+            for heading, content in sections:
+                if not content:
+                    continue
+                document.add_heading(heading, level=1)
+                document.add_paragraph(content.strip())
+
+            # Build the complete DOCX ZIP package in memory. No plaintext DOCX
+            # is written to the server filesystem in encrypted mode.
+            docx_stream = io.BytesIO()
+            document.save(docx_stream)
+            docx_stream.seek(0)
+
+            if encrypted_output:
+                self.secure_handler.encrypt_bytesio(docx_stream, str(temp_path))
+                os.replace(temp_path, self.export_path)
+                logger.info(f"Krypterat DOCX-resultat sparat: {self.export_path}")
+            else:
+                with open(temp_path, "wb") as export_file:
+                    export_file.write(docx_stream.getvalue())
+                os.replace(temp_path, self.export_path)
+                logger.info(f"DOCX-resultat sparat: {self.export_path}")
+        except Exception as ex:
+            if temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass
+            logger.error(f"Misslyckades med att spara DOCX-resultat: {str(ex)}")
+            raise
+
     def perform_transcription_steps(
         self,
         generate_summary=False,
@@ -751,10 +782,12 @@ def main():
     for convert_file in convert_files:
         logger.info(f"Processing {convert_file.name}...")
 
+        output_file = export_path / f"{convert_file.stem}.docx"
+
         # Instantiate transcriber with all required params
         transcriber = JBGtranscriber(
             convert_path=convert_file,
-            export_path=export_path,
+            export_path=output_file,
             device=device,
             api_key=api_key,
             openai_model=model

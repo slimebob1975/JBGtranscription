@@ -1,6 +1,5 @@
 // ✅ On page load: enable/disable fields based on API key presence
-let globalEncryptionKeyBase64 = null;
-let encryptionEnabled = true;
+let globalEncryptionKeyBase64 = "";
 
 fetch("/config")
   .then(res => res.json())
@@ -119,14 +118,12 @@ async function uploadFile() {
 
         formData.append("file", encryptedBlob, file.name + ".enc");
         formData.append("encryption_key", keyBase64);
+        globalEncryptionKeyBase64 = keyBase64;
 
-        globalEncryptionKeyBase64 = keyBase64;  // 👈 Gör nyckeln tillgänglig för checkStatus
-        encryptionEnabled = true;
     } else {
         formData.append("file", file);
-        formData.append("encryption_key", ""); // eller null eller "none"
-        globalEncryptionKeyBase64 = null;
-        encryptionEnabled = false;
+        formData.append("encryption_key", "");
+        globalEncryptionKeyBase64 = "";
     }
 
     formData.append("api_key", document.getElementById("apiKey").value.trim());
@@ -166,6 +163,33 @@ async function uploadFile() {
     }
 }
 
+async function downloadResult(file_id, filename) {
+    const formData = new FormData();
+    formData.append("encryption_key", globalEncryptionKeyBase64 || "");
+
+    const response = await fetch(`/download/${file_id}`, {
+        method: "POST",
+        body: formData
+    });
+
+    if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        throw new Error(`Nedladdningen misslyckades (${response.status}): ${text}`);
+    }
+
+    // The server decrypts encrypted results only in memory and streams the DOCX.
+    const blob = await response.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = blobUrl;
+    link.download = filename || "transkribering.docx";
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+}
+
 // ✅ Polling for transcription status – with live step updates
 async function checkStatus(file_id) {
     const spinner = document.getElementById("spinner-container");
@@ -173,8 +197,7 @@ async function checkStatus(file_id) {
 
     setTimeout(async () => {
         try {
-            const url = `/transcription/${file_id}?encryption_key=${encodeURIComponent(globalEncryptionKeyBase64 || "")}`;
-            const response = await fetch(url);
+            const response = await fetch(`/transcription/${file_id}`);
             console.info("HTTP status:", response.status);
 
             // 1) Jobbet pågår → 202 Accepted
@@ -211,7 +234,7 @@ async function checkStatus(file_id) {
                 return;
             }
 
-            // 3) 200 OK → nu ska vi ha ett färdigt resultat
+            // 3) 200 OK → jobbet är färdigt och DOCX-filen är sparad på servern
             let result;
             try {
                 result = await response.json();
@@ -239,22 +262,21 @@ async function checkStatus(file_id) {
                 return;
             }
 
-            // Klar och lyckad
+            // Klar och lyckad: hämta DOCX automatiskt.
             if (result.done === true) {
                 spinner.style.display = "none";
+                document.getElementById("status").innerText =
+                    result.status || "Transkribering avslutad. Startar nedladdning...";
 
-                const statusText = result.status || "Transkribering avslutad.";
-                const decodedText = result.transcription || "";
-
-                document.getElementById("status").innerText = statusText;
-                document.getElementById("result").value = decodedText;
-                document.getElementById("result").style.display = "inline";
-
-                const textBlob = new Blob([decodedText], { type: "text/plain" });
-                const urlBlob = URL.createObjectURL(textBlob);
-                document.getElementById("downloadLink").href = urlBlob;
-                document.getElementById("downloadLink").style.display = "inline";
-
+                try {
+                    await downloadResult(file_id, result.download_filename);
+                    document.getElementById("status").innerText =
+                        "Transkribering och analys avslutad. DOCX-fil laddas ner automatiskt.";
+                } catch (e) {
+                    console.error("Fel vid automatisk nedladdning:", e);
+                    document.getElementById("status").innerText =
+                        "Resultatet är klart, men den automatiska nedladdningen misslyckades. Ladda om sidan och försök igen innan serverfilen städas bort.";
+                }
                 return;
             }
 

@@ -14,3 +14,4 @@ cryptography
 resampy
 audioop-lts
 psutil
+python-docx
