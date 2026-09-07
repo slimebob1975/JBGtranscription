@@ -1,12 +1,14 @@
-from fastapi import FastAPI, File, UploadFile, BackgroundTasks, Form, Request, HTTPException
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi import FastAPI, File, UploadFile, BackgroundTasks, Form, Request, Response, HTTPException
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.background import BackgroundTask
 import os
 from dotenv import load_dotenv
 import sys
 import shutil
 import uuid
+import re
 import src.JBGtranscriber as JBGtranscriber
 from src.JBGSecureFileHandler import SecureFileHandler
 from pathlib import Path
@@ -14,10 +16,6 @@ import torch
 from src.JBGLogger import JBGLogger
 from urllib.parse import unquote_plus
 import base64
-from fastapi import FastAPI
-from fastapi.responses import StreamingResponse
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-import secrets
 from io import BytesIO
 
 logger = JBGLogger(level="DEBUG").logger
@@ -40,6 +38,70 @@ os.chmod(RESULTS_FOLDER, 0o777)
 
 # In-memory job status store: file_id -> dict
 jobs = {}
+
+
+def clean_up_audio_file(audio_file_path: Path):
+    """Remove the temporary uploaded audio file after processing."""
+    if not audio_file_path.exists():
+        return
+
+    try:
+        audio_file_path.unlink()
+        logger.info(f"Uppladdad ljudfil raderad efter transkribering: {audio_file_path}")
+    except Exception as e:
+        logger.warning(f"Misslyckades med att radera uppladdad ljudfil {audio_file_path}: {e}")
+
+
+def make_result_filename(upload_filename: str, file_id: str) -> str:
+    """Create a readable, Windows-safe DOCX filename with a collision-resistant suffix."""
+    original_name = upload_filename or "transkribering.mp3"
+    if original_name.lower().endswith(".enc"):
+        original_name = original_name[:-4]
+
+    source_stem = Path(original_name).stem
+    safe_stem = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", source_stem).strip(" .")
+    safe_stem = (safe_stem or "transkribering")[:100]
+    return f"{safe_stem}_{file_id}.docx"
+
+
+def validate_file_id(file_id: str) -> str:
+    """Accept only canonical UUID job identifiers before using them in glob patterns."""
+    try:
+        return str(uuid.UUID(file_id))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid file id.")
+
+
+def find_result_path(file_id: str):
+    """Find an encrypted or plaintext result for a job without trusting user path input."""
+    canonical_id = validate_file_id(file_id)
+    patterns = (
+        f"*_{canonical_id}.docx.encrypted",
+        f"*_{canonical_id}.docx",
+    )
+    for pattern in patterns:
+        matches = list(RESULTS_FOLDER.glob(pattern))
+        if matches:
+            return matches[0]
+    return None
+
+
+def download_name_from_storage_path(result_path: Path) -> str:
+    """Return the client-facing .docx filename for a stored result."""
+    name = result_path.name
+    if name.lower().endswith(".encrypted"):
+        name = name[:-len(".encrypted")]
+    return name
+
+
+def delete_result_file(result_path: Path):
+    """Delete a result after its HTTP response has finished streaming."""
+    try:
+        result_path.unlink(missing_ok=True)
+        logger.info(f"Resultatfil raderad efter avslutad nedladdningsström: {result_path}")
+    except Exception as e:
+        logger.warning(f"Kunde inte radera resultatfil efter nedladdning {result_path}: {e}")
+
 
 # Function to transcribe in the background
 def transcribe_audio(
@@ -99,60 +161,23 @@ def transcribe_audio(
             progress_callback=progress_callback,
         )
 
-        # Radera krypterad mp3-fil från disk
-        try:
-            os.remove(file_path)
-            logger.info(f"Uppladdad ljudfil raderad efter ev. kryptering och transkribering: {file_path}")
-        except Exception as e:
-            logger.warning(f"Misslyckades med att radera uppladdad ljudfil efter ev. kryptering och transkribering: {file_path}: {e}")
-
-        # Städa gamla transkript
-        clean_up_files(Path(file_path), Path(RESULTS_FOLDER))
+        clean_up_audio_file(Path(file_path))
 
         job = jobs.get(file_id)
         if job is not None:
             job["done"] = True
-            # keep last progress message if set, otherwise set a default
             if not job.get("status"):
                 job["status"] = "Transkribering avslutad."
             job["error"] = None
 
     except Exception as e:
         logger.error(f"Transcription error: {e}")
+        clean_up_audio_file(Path(file_path))
         job = jobs.setdefault(file_id, {})
         job["done"] = True
         job["error"] = str(e)
         job["status"] = "Ett fel uppstod vid transkriberingen."
-    
-def clean_up_files(audio_file_path: Path, transcriptions_path: Path):
-    
-    # Remove last audio file
-    if audio_file_path.exists():
-        Path.unlink(audio_file_path)
-    
-    # Remove all but the last transcription file (which is the transcription of the audio file)
-    old_transcripts = sorted([file for file in transcriptions_path.glob("*.mp3.txt")], key=lambda x: x.stat().st_ctime)[:-1]
-    for file in old_transcripts:
-        if file.exists():
-            Path.unlink(file)
-            
-def decrypt_transcription_file_if_needed(result_path: str, encryption_key: str) -> str:
 
-    if encryption_key:
-        try:
-            secure_handler = SecureFileHandler(encryption_key)
-            decrypted_stream = secure_handler.decrypt_file_to_memory(result_path)
-            return decrypted_stream.read().decode("utf-8")
-        except Exception as e:
-            logger.error(f"Decryption failed: {e}")
-            raise HTTPException(status_code=500, detail="Could not decrypt transcription file.")
-    else:
-        try:
-            with open(str(result_path), "r", encoding="utf-8") as f:
-                return f.read()
-        except Exception as e:
-            logger.error(f"Reading plaintext transcription failed: {e}")
-            raise HTTPException(status_code=500, detail="Could not read transcription file.")
 
 class FrameOptionsMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -160,16 +185,18 @@ class FrameOptionsMiddleware(BaseHTTPMiddleware):
         # Remove 'x-frame-options' if it exists (case-insensitive)
         if "x-frame-options" in response.headers:
             del response.headers["x-frame-options"]
-        # Allow embedding from any origin (use with caution)
-        response.headers["Content-Security-Policy"] = f"frame-ancestors {FRAME_ANCESTORS}"    
+        # Allow embedding from configured origins.
+        response.headers["Content-Security-Policy"] = f"frame-ancestors {FRAME_ANCESTORS}"
         return response
-    
+
+
 # Allow embedding via iframes
 load_dotenv()
 FRAME_ANCESTORS = os.getenv("FRAME_ANCESTORS", "*")
 if not FRAME_ANCESTORS or FRAME_ANCESTORS == "*":
     logger.warning("⚠️ Warning: Using default FRAME_ANCESTORS='*'. Set in .env (localhost) or Azure App Settings (deployed).")
 app.add_middleware(FrameOptionsMiddleware)
+
 
 @app.get("/config")
 def get_config():
@@ -179,6 +206,7 @@ def get_config():
     logger.info(f" Kryptering är tillval: {encryption_is_optional}")
     return {"title": title, "encryption_is_optional": encryption_is_optional}
 
+
 # To find and log the current user
 @app.get("/me")
 def get_user(request: Request):
@@ -186,6 +214,7 @@ def get_user(request: Request):
     user = unquote_plus(raw_user)
     logger.info(f" Användare inloggad: {user}")
     return {"user": user}
+
 
 # Entry point for uploading audio files
 @app.post("/upload/")
@@ -201,14 +230,22 @@ async def upload_audio(
     questions: bool = Form(False),
     speakers: bool = Form(False)
 ):
-    
     logger.info(f"Upload endpoint received encryption_key: {'✅ present' if encryption_key else '❌ missing or empty'}")
     logger.info(f"Length of encryption_key: {len(encryption_key)} characters")
-    try:
-        _ = base64.b64decode(encryption_key, validate=True)
-        logger.info("encryption_key verkar vara giltig base64")
-    except Exception:
-        logger.warning("encryption_key är INTE giltig base64!")
+
+    encryption_required = os.getenv("ENCRYPTION_IS_OPTIONAL", "1") != "1"
+    if encryption_required and not encryption_key:
+        raise HTTPException(status_code=400, detail="Encryption is required by server configuration.")
+
+    if encryption_key:
+        try:
+            decoded_key = base64.b64decode(encryption_key, validate=True)
+            if len(decoded_key) != 32:
+                raise ValueError("AES-GCM key must be 32 bytes")
+            logger.info("encryption_key verkar vara giltig base64 och 256 bitar lång")
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid encryption key.")
+
     logger.info(f"""
           OpenAI API key was provided: {api_key != "sk-..."}\n
           OpenAI model of choice: {model}\n
@@ -218,22 +255,26 @@ async def upload_audio(
           \tGenerate questions: {questions} \n 
           \tSpeaker detection: {speakers}
           """)
-    
+
     file_id = str(uuid.uuid4())
     file_path = UPLOAD_FOLDER / (file_id + (".mp3.encrypted" if encryption_key else ".mp3"))
-    result_path = RESULTS_FOLDER / f"{file_id}.mp3.txt"
+    download_filename = make_result_filename(file.filename, file_id)
+    storage_filename = download_filename + (".encrypted" if encryption_key else "")
+    result_path = RESULTS_FOLDER / storage_filename
 
-     # Initiera jobbstatus
     jobs[file_id] = {
         "status": "Fil uppladdad. Väntar på att transkriberingen ska starta...",
         "done": False,
         "error": None,
+        "download_filename": download_filename,
+        "encrypted": bool(encryption_key),
     }
 
     if encryption_key:
         logger.info("Krypterad fil sparas...")
     else:
         logger.info("Ej krypterad fil sparas...")
+
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
@@ -255,14 +296,28 @@ async def upload_audio(
 
     return JSONResponse({"message": "File uploaded, processing started.", "file_id": file_id})
 
-# Endpoint to get transcription as JSON
+
+# Endpoint to get transcription job status.
+# No result content or encryption key is sent through this endpoint.
 @app.get("/transcription/{file_id}")
-async def get_transcription(file_id: str, encryption_key: str = ""):
-    result_path = RESULTS_FOLDER / f"{file_id}.mp3.txt"
+async def get_transcription_status(file_id: str):
     job = jobs.get(file_id)
 
-    # Om jobb finns och är markerat som klart med fel → returnera fel
-    if job is not None and job.get("done") and job.get("error"):
+    if job is None:
+        result_path = find_result_path(file_id)
+        if result_path is not None:
+            return {
+                "done": True,
+                "status": "Transkribering avslutad. Startar nedladdning...",
+                "download_filename": download_name_from_storage_path(result_path),
+            }
+
+        return JSONResponse(
+            {"done": False, "status": "Processar..."},
+            status_code=202,
+        )
+
+    if job.get("done") and job.get("error"):
         return JSONResponse(
             {
                 "done": True,
@@ -271,69 +326,62 @@ async def get_transcription(file_id: str, encryption_key: str = ""):
             },
             status_code=500,
         )
-    
-    # If file does not exist yet → still processing
-    if not result_path.exists():
-        # If job exists → show its status
-        if job is not None:
-            return JSONResponse(
-                {
-                    "done": False,
-                    "status": job.get("status") or "Processar...",
-                },
-                status_code=202,
-            )
 
-        # If job does NOT exist → probably another instance is handling it
+    if not job.get("done"):
         return JSONResponse(
             {
                 "done": False,
-                "status": "Processar...",
+                "status": job.get("status") or "Processar...",
             },
             status_code=202,
         )
 
-    # If file exists, we treat it as finished.
-    content = decrypt_transcription_file_if_needed(str(result_path), encryption_key)
-
-    # If job exists → use its final message
-    if job is not None:
-        final_status = job.get("status") or "Transkribering avslutad."
-    else:
-        final_status = "Transkribering avslutad."
-
     return {
         "done": True,
-        "status": final_status,
-        "transcription": content,
+        "status": "Transkribering avslutad. Startar nedladdning...",
+        "download_filename": job.get("download_filename"),
     }
 
-# Endpoint to download transcription as a file
-@app.get("/download/{file_id}")
-async def download_transcription(file_id: str, key: str = ""):
-    result_path = os.path.join(RESULTS_FOLDER, file_id + ".mp3.txt")
 
-    if not os.path.exists(result_path):
+# Download the finished DOCX. If encrypted, decryption happens only in memory.
+# The server-side result file is removed after the response has been fully streamed.
+@app.post("/download/{file_id}")
+async def download_transcription(file_id: str, encryption_key: str = Form("")):
+    result_path = find_result_path(file_id)
+    if result_path is None:
         return JSONResponse({"error": "Transcription not found"}, status_code=404)
 
+    encrypted = result_path.name.lower().endswith(".encrypted")
     try:
-        content = decrypt_transcription_file_if_needed(str(result_path), key)
-        stream = BytesIO(content.encode("utf-8"))
-        filename = f"{file_id}.txt"
+        if encrypted:
+            if not encryption_key:
+                return JSONResponse(
+                    {"error": "Encryption key is required"},
+                    status_code=400,
+                )
+            secure_handler = SecureFileHandler(encryption_key)
+            stream = secure_handler.decrypt_file_to_memory(str(result_path))
+        else:
+            stream = BytesIO(result_path.read_bytes())
+
+        filename = download_name_from_storage_path(result_path)
         return StreamingResponse(
             stream,
-            media_type="text/plain",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            background=BackgroundTask(delete_result_file, result_path),
         )
     except Exception as e:
-        logger.error(f"Could not stream transcription result: {e}")
-        return JSONResponse({"error": "Failed to serve transcription file."}, status_code=500)
+        logger.error(f"Could not stream DOCX result: {e}")
+        return JSONResponse({"error": "Failed to serve DOCX result."}, status_code=500)
+
 
 # ----------------------------------------------------------------
 # Return the connection with the frontend
 @app.get("/")
 async def serve_home():
     return FileResponse(STATIC_DIR / "index.html")
+
 
 # Ensure FastAPI serves static files (including index.html)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
