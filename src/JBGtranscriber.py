@@ -16,8 +16,12 @@ try:
     import resampy
     import difflib
     import os
+    import re
     from docx import Document
     from docx.shared import Pt
+    from docx.enum.text import WD_COLOR_INDEX
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
 except ModuleNotFoundError as ex:
     sys.exit("You probably need to install some missing modules:" + str(ex))
 from src.JBGLogger import JBGLogger
@@ -628,6 +632,227 @@ class JBGtranscriber():
             
         return transcription, transcription_w_timestamps
 
+    @staticmethod
+    def _configure_word_styles(document):
+        """Apply a restrained, readable style hierarchy to generated Word files."""
+
+        style_settings = {
+            "Normal": (11, False, 0, 6),
+            "Title": (22, True, 0, 12),
+            "Heading 1": (16, True, 16, 8),
+            "Heading 2": (14, True, 14, 6),
+            "Heading 3": (12, True, 12, 4),
+            "Heading 4": (11, True, 10, 3),
+        }
+
+        for style_name, (font_size, bold, before, after) in style_settings.items():
+            if style_name not in document.styles:
+                continue
+            style = document.styles[style_name]
+            style.font.name = "Aptos"
+            style.font.size = Pt(font_size)
+            style.font.bold = bold
+            style.paragraph_format.space_before = Pt(before)
+            style.paragraph_format.space_after = Pt(after)
+            if style_name.startswith("Heading"):
+                style.paragraph_format.keep_with_next = True
+
+        document.styles["Normal"].paragraph_format.line_spacing = 1.08
+
+    @staticmethod
+    def _add_inline_word_markup(paragraph, text):
+        """Render the small Markdown subset returned by the AI as native Word runs.
+
+        Supported constructs are bold/italic Markdown and the application's
+        [FEL?]...[/FEL?] markers. Control markers themselves are never written to
+        the document.
+        """
+
+        bold = False
+        italic = False
+        code = False
+        suspect = False
+        buffer = []
+
+        def flush_buffer():
+            if not buffer:
+                return
+            run = paragraph.add_run("".join(buffer))
+            run.bold = bold
+            run.italic = italic
+            if code:
+                run.font.name = "Consolas"
+            if suspect:
+                run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+                run.bold = True
+            buffer.clear()
+
+        i = 0
+        while i < len(text):
+            if text.startswith("[FEL?]", i):
+                flush_buffer()
+                suspect = True
+                i += len("[FEL?]")
+                continue
+            if text.startswith("[/FEL?]", i):
+                flush_buffer()
+                suspect = False
+                i += len("[/FEL?]")
+                continue
+            if text.startswith("***", i):
+                flush_buffer()
+                bold = not bold
+                italic = not italic
+                i += 3
+                continue
+            if text.startswith("**", i):
+                flush_buffer()
+                bold = not bold
+                i += 2
+                continue
+            if text[i] == "*":
+                flush_buffer()
+                italic = not italic
+                i += 1
+                continue
+            if text[i] == "`":
+                flush_buffer()
+                code = not code
+                i += 1
+                continue
+
+            buffer.append(text[i])
+            i += 1
+
+        flush_buffer()
+
+    @staticmethod
+    def _add_horizontal_rule(document):
+        """Add a subtle Word paragraph border instead of a literal Markdown '---'."""
+
+        paragraph = document.add_paragraph()
+        p_pr = paragraph._p.get_or_add_pPr()
+        p_bdr = OxmlElement("w:pBdr")
+        bottom = OxmlElement("w:bottom")
+        bottom.set(qn("w:val"), "single")
+        bottom.set(qn("w:sz"), "4")
+        bottom.set(qn("w:space"), "1")
+        bottom.set(qn("w:color"), "B7C9E2")
+        p_bdr.append(bottom)
+        p_pr.append(p_bdr)
+        paragraph.paragraph_format.space_before = Pt(3)
+        paragraph.paragraph_format.space_after = Pt(6)
+
+    @staticmethod
+    def _add_plain_word_content(document, content, parse_inline=False, speaker_labels=False):
+        """Write prose while preserving intentional paragraph and line breaks."""
+
+        if not content:
+            return
+
+        blocks = re.split(r"\n\s*\n", content.strip())
+        for block in blocks:
+            if not block.strip():
+                continue
+
+            if speaker_labels:
+                match = re.match(
+                    r"^((?:Intervjuare|Intervjuobjekt)\s+\d+)\s*:\s*(.*)$",
+                    block.strip(),
+                    flags=re.DOTALL,
+                )
+                if match:
+                    paragraph = document.add_paragraph()
+                    label = paragraph.add_run(match.group(1) + ": ")
+                    label.bold = True
+                    JBGtranscriber._add_inline_word_markup(paragraph, match.group(2).strip())
+                    paragraph.paragraph_format.space_after = Pt(4)
+                    continue
+
+            paragraph = document.add_paragraph()
+            lines = block.splitlines()
+            for line_index, line in enumerate(lines):
+                if parse_inline:
+                    JBGtranscriber._add_inline_word_markup(paragraph, line.rstrip())
+                else:
+                    paragraph.add_run(line.rstrip())
+                if line_index < len(lines) - 1:
+                    paragraph.add_run().add_break()
+
+    @staticmethod
+    def _add_structured_word_content(document, content):
+        """Convert AI Markdown-like output to real Word headings, lists and runs."""
+
+        if not content:
+            return
+
+        for raw_line in content.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+            line = raw_line.rstrip()
+            stripped = line.strip()
+            if not stripped:
+                continue
+
+            if re.fullmatch(r"-{2,}", stripped):
+                JBGtranscriber._add_horizontal_rule(document)
+                continue
+
+            heading_match = re.match(r"^(#{1,6})\s+(.+?)\s*#*$", stripped)
+            if heading_match:
+                hashes, heading_text = heading_match.groups()
+                # AI summaries typically use ##/### for divisions that are nested
+                # under the application's own Heading 1 section title.
+                heading_level = 2 if len(hashes) <= 3 else min(4, len(hashes) - 1)
+                document.add_heading(heading_text.rstrip(":").strip(), level=heading_level)
+                continue
+
+            bold_only = re.fullmatch(r"\*\*(.+?)\*\*\s*", stripped)
+            if bold_only:
+                heading_text = bold_only.group(1).strip()
+                if re.match(r"^\d+[.)]\s+", heading_text):
+                    heading_level = 3
+                elif heading_text.endswith(":"):
+                    heading_level = 4
+                else:
+                    heading_level = 3
+                document.add_heading(heading_text.rstrip(":").strip(), level=heading_level)
+                continue
+
+            italic_label = re.match(r"^\*([^*]+?):\*\s*(.*)$", stripped)
+            if italic_label:
+                label, remainder = italic_label.groups()
+                document.add_heading(label.strip(), level=4)
+                if remainder.strip():
+                    paragraph = document.add_paragraph()
+                    JBGtranscriber._add_inline_word_markup(paragraph, remainder.strip())
+                continue
+
+            bullet_match = re.match(r"^(\s*)[-+*]\s+(.+)$", line)
+            if bullet_match:
+                indent, bullet_text = bullet_match.groups()
+                level = min(2, max(0, len(indent.expandtabs(2)) // 2))
+                style_name = "List Bullet" if level == 0 else f"List Bullet {level + 1}"
+                paragraph = document.add_paragraph(style=style_name)
+                JBGtranscriber._add_inline_word_markup(paragraph, bullet_text.strip())
+                continue
+
+            numbered_match = re.match(r"^(\s*)\d+[.)]\s+(.+)$", line)
+            if numbered_match:
+                indent, numbered_text = numbered_match.groups()
+                level = min(2, max(0, len(indent.expandtabs(2)) // 2))
+                style_name = "List Number" if level == 0 else f"List Number {level + 1}"
+                paragraph = document.add_paragraph(style=style_name)
+                JBGtranscriber._add_inline_word_markup(paragraph, numbered_text.strip())
+                continue
+
+            quote_match = re.match(r"^>\s?(.*)$", stripped)
+            if quote_match:
+                paragraph = document.add_paragraph(style="Quote")
+                JBGtranscriber._add_inline_word_markup(paragraph, quote_match.group(1))
+                continue
+
+            paragraph = document.add_paragraph()
+            JBGtranscriber._add_inline_word_markup(paragraph, stripped)
+
     def write_to_output_file(self):
         """Write transcription and selected analyses to a Word document.
 
@@ -645,29 +870,33 @@ class JBGtranscriber():
             raise ValueError(f"Output path must use the .docx extension: {self.export_path}")
 
         sections = [
-            ("Rå transkribering", self.transcription),
-            ("Transkribering med tidsstämplar", self.transcription_w_timestamps),
-            ("Sammanfattning", self.summary),
-            ("Transkription med markerade misstänkta fraser", self.marked_text),
-            ("Uppföljningsfrågor", self.follow_up_questions),
-            ("Försök till identifiering av olika talare", self.analyze_speakers),
+            ("Rå transkribering", self.transcription, "plain"),
+            ("Transkribering med tidsstämplar", self.transcription_w_timestamps, "plain"),
+            ("Sammanfattning", self.summary, "structured"),
+            ("Transkription med markerade misstänkta fraser", self.marked_text, "marked"),
+            ("Uppföljningsfrågor", self.follow_up_questions, "structured"),
+            ("Försök till identifiering av olika talare", self.analyze_speakers, "speakers"),
         ]
 
         temp_path = self.export_path.with_name(self.export_path.name + ".tmp")
         try:
             self.export_path.parent.mkdir(parents=True, exist_ok=True)
             document = Document()
+            JBGtranscriber._configure_word_styles(document)
             document.add_heading("Transkribering och analys", level=0)
 
-            normal_style = document.styles["Normal"]
-            normal_style.font.name = "Aptos"
-            normal_style.font.size = Pt(11)
-
-            for heading, content in sections:
+            for heading, content, render_mode in sections:
                 if not content:
                     continue
                 document.add_heading(heading, level=1)
-                document.add_paragraph(content.strip())
+                if render_mode == "structured":
+                    JBGtranscriber._add_structured_word_content(document, content)
+                elif render_mode == "marked":
+                    JBGtranscriber._add_plain_word_content(document, content, parse_inline=True)
+                elif render_mode == "speakers":
+                    JBGtranscriber._add_plain_word_content(document, content, parse_inline=True, speaker_labels=True)
+                else:
+                    JBGtranscriber._add_plain_word_content(document, content)
 
             # Build the complete DOCX ZIP package in memory. No plaintext DOCX
             # is written to the server filesystem in encrypted mode.

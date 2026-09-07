@@ -16,6 +16,8 @@ The completed transcription and selected analyses are assembled as a **Microsoft
   - Attempt **speaker identification** (beta)
 - 📝 Generate the complete result as a structured `.docx` document
 - 🧩 Separate Word headings for each available output section
+- 🧱 Convert AI Markdown-style structure to native Word headings, lists and text formatting
+- 🟨 Show suspected transcription errors with Word highlighting instead of `[FEL?]` control tags
 - ⬇️ Automatically download the DOCX when transcription and selected analyses are complete
 - 🔑 Enter an OpenAI API key in the browser; it is not persisted server-side
 - 🔒 Optional client-side encryption of the uploaded audio file
@@ -35,7 +37,18 @@ After transcription and all selected analysis steps have completed, the service 
 5. **Uppföljningsfrågor** (optional)
 6. **Försök till identifiering av olika talare** (optional)
 
-Each top-level output section uses a real Word heading style.
+Each top-level output section uses a real Word heading style. AI-generated
+Markdown-like formatting is converted when the DOCX is built, so formatting
+markers are not left as visible text in the result. In particular:
+
+- `##` / `###` headings become nested Word heading levels.
+- Standalone bold topic lines become Word subheadings.
+- Labels such as `*Introduktion:*` become lower-level Word subheadings.
+- `-` bullet lines and numbered items become native Word lists, including nested bullets.
+- Inline `**bold**`, `*italic*` and backtick markup becomes Word run formatting.
+- Markdown separator lines such as `---` become Word paragraph borders.
+- `[FEL?]...[/FEL?]` markers are removed and the suspected phrase is highlighted in Word.
+- Speaker labels such as `Intervjuare 1:` and `Intervjuobjekt 1:` are rendered in bold.
 
 When encryption is enabled, the complete DOCX package is first generated in a `BytesIO` memory stream and then encrypted with AES-256-GCM before it is written to disk. The server-side file therefore has a name such as:
 
