@@ -81,6 +81,10 @@ function refreshSummaryPromptState() {
         state.hidden = true;
         resetButton.hidden = true;
     }
+    const subtitle = document.getElementById("summaryEditorSubtitle");
+    if (subtitle) {
+        subtitle.textContent = `Utgår från: ${summaryStyleLabel(currentSummaryStyle())}`;
+    }
 }
 
 function applySummaryDefault(id) {
@@ -112,6 +116,115 @@ function populateSummaryStyleSelect() {
     });
 }
 
+// --- Floating editor ---------------------------------------------------------
+// The instruction is edited in a <dialog> so that showing it never changes the
+// height of the page. Native showModal() is used for the focus trap, the
+// backdrop and Esc; only its default centring is overridden, because that
+// centres on the iframe's own viewport rather than what the user can see.
+
+let summaryPromptSnapshot = null;   // text as it was when the editor opened
+let latestParentPageInfo = null;    // from iframe-resizer, when embedded
+
+function trackParentPageInfo() {
+    // getPageInfo reports the parent's scroll position and viewport, so the
+    // editor can open where the user is actually looking. Absent or silent
+    // when not embedded, in which case the trigger anchor is used alone.
+    try {
+        if (window.parentIFrame && typeof window.parentIFrame.getPageInfo === "function") {
+            window.parentIFrame.getPageInfo(info => { latestParentPageInfo = info; });
+        }
+    } catch (err) {
+        console.warn("Kunde inte läsa förälderns sidinformation:", err);
+    }
+}
+
+function positionSummaryEditor(trigger) {
+    // Called after the dialog is shown, so its real height can be measured.
+    const dialog = document.getElementById("summaryEditor");
+    const dialogHeight = dialog.offsetHeight || 460;
+    const info = latestParentPageInfo;
+
+    // Fallback: anchor above the link the user just clicked. It is on screen by
+    // definition, so this is safe when nothing else is known.
+    let top = trigger.getBoundingClientRect().top + window.scrollY - 120;
+
+    if (info && typeof info.scrollTop === "number" && typeof info.offsetTop === "number") {
+        // Embedded, and the parent has reported its scroll position: centre on
+        // the part of the iframe the user can actually see.
+        const visibleTop = info.scrollTop - info.offsetTop;
+        const visibleHeight = info.clientHeight || info.windowHeight || 0;
+        if (visibleHeight > 0) {
+            top = visibleTop + (visibleHeight - dialogHeight) / 2;
+        }
+    } else if (!window.parentIFrame) {
+        // Standalone: innerHeight is the real window, so centre on it.
+        top = window.scrollY + (window.innerHeight - dialogHeight) / 2;
+    }
+
+    dialog.style.top = `${Math.round(Math.max(8, top))}px`;
+}
+
+function openSummaryEditor() {
+    const dialog = document.getElementById("summaryEditor");
+    const textarea = document.getElementById("summaryPrompt");
+    const trigger = document.getElementById("openSummaryEditor");
+
+    summaryPromptSnapshot = textarea.value;
+
+    if (typeof dialog.showModal === "function") {
+        dialog.showModal();
+    } else {
+        dialog.setAttribute("open", "");   // very old browsers: no modality
+    }
+    positionSummaryEditor(trigger);
+    textarea.focus();
+    textarea.setSelectionRange(0, 0);
+    textarea.scrollTop = 0;
+}
+
+function closeSummaryEditor(apply) {
+    const dialog = document.getElementById("summaryEditor");
+    const textarea = document.getElementById("summaryPrompt");
+
+    if (!apply && summaryPromptSnapshot !== null) {
+        textarea.value = summaryPromptSnapshot;   // Avbryt and Esc revert
+    }
+    summaryPromptSnapshot = null;
+
+    storeSummaryPrompt();
+    refreshSummaryPromptState();
+
+    if (dialog.open && typeof dialog.close === "function") {
+        dialog.close();
+    } else {
+        dialog.removeAttribute("open");
+    }
+}
+
+function setUpSummaryEditorDialog() {
+    const dialog = document.getElementById("summaryEditor");
+
+    document.getElementById("openSummaryEditor")
+        .addEventListener("click", openSummaryEditor);
+    document.getElementById("applySummaryEditor")
+        .addEventListener("click", () => closeSummaryEditor(true));
+    document.getElementById("cancelSummaryEditor")
+        .addEventListener("click", () => closeSummaryEditor(false));
+
+    // Esc means the same here as everywhere else: discard and close.
+    dialog.addEventListener("cancel", event => {
+        event.preventDefault();
+        closeSummaryEditor(false);
+    });
+
+    // Clicking the backdrop is treated as Avbryt.
+    dialog.addEventListener("click", event => {
+        if (event.target === dialog) closeSummaryEditor(false);
+    });
+
+    trackParentPageInfo();
+}
+
 function setUpSummaryPromptEditor() {
     const textarea = document.getElementById("summaryPrompt");
     const resetButton = document.getElementById("resetSummaryPrompt");
@@ -129,6 +242,8 @@ function setUpSummaryPromptEditor() {
         applySummaryDefault(currentSummaryStyle());
         textarea.focus();
     });
+
+    setUpSummaryEditorDialog();
 
     // Remembered so the selection can be restored if the user cancels.
     let previousStyle = null;
@@ -239,7 +354,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const show = summaryCheckbox.checked;
         summaryOptions.hidden = !show;
         document.getElementById("summaryStyle").disabled = !show;
-        document.getElementById("summaryPrompt").disabled = !show;
+        document.getElementById("openSummaryEditor").disabled = !show;
     });
 
     setUpSummaryPromptEditor();
@@ -282,8 +397,7 @@ async function uploadFile() {
     document.getElementById("apiKey").disabled = true;
     document.getElementById("modelSelect").disabled = true;
     document.getElementById("optSummary").disabled = true;
-    document.getElementById("summaryPrompt").disabled = true;
-    document.getElementById("resetSummaryPrompt").disabled = true;
+    document.getElementById("openSummaryEditor").disabled = true;
     document.getElementById("summaryStyle").disabled = true;
     document.getElementById("optSuspicious").disabled = true;
     document.getElementById("optQuestions").disabled = true;

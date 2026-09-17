@@ -44,11 +44,8 @@
                     <label for="summaryStyle">Typ av sammanfattning:</label>
                     <select id="summaryStyle" name="summaryStyle"></select>
                 </div>
-                <label for="summaryPrompt">Redigera promptinstruktioner:</label>
-                <textarea id="summaryPrompt" rows="10" spellcheck="true"
-                          title="Instruktionen som skickas till språkmodellen tillsammans med transkriberingen"></textarea>
                 <div class="summary-prompt-footer">
-                    <button type="button" id="resetSummaryPrompt" class="link-button" hidden>Återgå till standardtexten</button>
+                    <button type="button" id="openSummaryEditor" class="link-button">Redigera promptinstruktioner</button>
                     <span id="summaryPromptState" class="summary-prompt-state" hidden></span>
                 </div>
             </div><br>
@@ -72,6 +69,23 @@
         </p>
 
     </div> <!-- Wrapper -->
+
+    <!-- Floating editor for the summary instruction. Kept out of normal flow so
+         that opening it does not change the height of the page. -->
+    <dialog id="summaryEditor" class="summary-editor" aria-labelledby="summaryEditorTitle">
+        <div class="summary-editor-head">
+            <h2 id="summaryEditorTitle">Redigera promptinstruktioner</h2>
+            <p id="summaryEditorSubtitle" class="summary-editor-subtitle"></p>
+        </div>
+        <textarea id="summaryPrompt" spellcheck="true"
+                  title="Instruktionen som skickas till språkmodellen tillsammans med transkriberingen"></textarea>
+        <div class="summary-editor-actions">
+            <button type="button" id="resetSummaryPrompt" class="link-button" hidden>Återgå till standardtexten</button>
+            <span class="summary-editor-spacer"></span>
+            <button type="button" id="cancelSummaryEditor" class="secondary-button">Avbryt</button>
+            <button type="button" id="applySummaryEditor">Klar</button>
+        </div>
+    </dialog>
     
     <!-- For iframe to work -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/iframe-resizer/4.3.2/iframeResizer.contentWindow.min.js"></script>
