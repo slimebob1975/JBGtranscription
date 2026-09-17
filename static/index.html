@@ -39,9 +39,18 @@
             </select><br><br>
             <label>Ange vilken textanalys du vill göra:</label><br>
             <label><input type="checkbox" id="optSummary" title="Genererar en sammanfattning i stil med Chat-GPT"> Generera sammanfattning</label>
-            <div id="summaryOptions" style="margin-left: 1rem; display: none;">
-                <label><input type="radio" name="summaryStyle" value="short" checked> Enkel</label>
-                <label><input type="radio" name="summaryStyle" value="extensive"> Utförlig</label>
+            <div id="summaryOptions" class="summary-options" hidden>
+                <div class="summary-style-choice">
+                    <label for="summaryStyle">Typ av sammanfattning:</label>
+                    <select id="summaryStyle" name="summaryStyle"></select>
+                </div>
+                <label for="summaryPrompt">Redigera promptinstruktioner:</label>
+                <textarea id="summaryPrompt" rows="10" spellcheck="true"
+                          title="Instruktionen som skickas till språkmodellen tillsammans med transkriberingen"></textarea>
+                <div class="summary-prompt-footer">
+                    <button type="button" id="resetSummaryPrompt" class="link-button" hidden>Återgå till standardtexten</button>
+                    <span id="summaryPromptState" class="summary-prompt-state" hidden></span>
+                </div>
             </div><br>
             <label><input type="checkbox" id="optSuspicious" title="Markerar misstänkta transkriberingsfel mellan taggarna [FEL?] och [/FEL?]"> Markera misstänkta fel i transkriberingen</label><br>
             <label><input type="checkbox" id="optQuestions" title="Genererar förslag på uppföljningsfrågor baserat på den transkriberade texten"> Föreslå följdfrågor baserat på innehållet</label><br>

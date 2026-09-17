@@ -31,9 +31,98 @@ CACHE_TRANSCRIPTION_MARKER = "===TRANSCRIPTION==="
 CACHE_TIMESTAMPED_MARKER = "===TIMESTAMPED==="
 MODEL_GPT_5_MARKER = "gpt-5"
 
- # Max tokens per segment (input + output < 8000 tokens)
-MAX_INPUT_TOKENS = 3500
-OVERLAP_TOKENS = 300
+# --- Segmentation of long transcriptions -------------------------------------
+#
+# The old implementation used a single hard-coded budget of 3500 tokens, which
+# was sized for 4k-context models. Current models have far larger context
+# windows, so a one-hour interview that used to be cut into 5-8 pieces normally
+# fits in a single call today. Fewer segments means better summaries, so the
+# budget is now resolved per model, can be overridden by configuration, and is
+# automatically lowered if the API reports that the context window was exceeded.
+
+# Used when the model is unknown. Deliberately conservative relative to a
+# 128k-token context window, to leave room for instructions and the answer.
+DEFAULT_MAX_INPUT_TOKENS = 100000
+
+# Never segment into pieces smaller than this, however far the budget is lowered.
+MIN_MAX_INPUT_TOKENS = 2000
+
+# Reserved headroom for the model's own answer plus the chat scaffolding.
+RESERVED_RESPONSE_TOKENS = 12000
+
+# Longest matching prefix wins. Extend as models are added to the GUI.
+MODEL_INPUT_TOKEN_BUDGETS = {
+    "gpt-3.5": 12000,
+    "gpt-4": 6000,
+    "gpt-4-turbo": 100000,
+    "gpt-4o": 100000,
+    "gpt-4.1": 100000,
+    "gpt-5": 100000,
+}
+
+# How many trailing sentences are repeated at the start of the next segment so
+# that a thought split across a boundary is not lost.
+SEGMENT_OVERLAP_SENTENCES = 2
+
+# Pause between segment calls to stay clear of rate limits.
+SEGMENT_PAUSE_SECONDS = 5
+
+# How many times the budget may be halved in response to a context-length error.
+MAX_BUDGET_DOWNSHIFTS = 4
+
+# Kept for backwards compatibility with any external caller.
+MAX_INPUT_TOKENS = DEFAULT_MAX_INPUT_TOKENS
+
+# Upper bound on a user-supplied summary instruction.
+MAX_SUMMARY_PROMPT_CHARS = 20000
+
+# Option ids used before the summary options were made configurable. Browsers
+# still hold these in localStorage, and older clients still post them, so they
+# are mapped onto their current equivalents rather than rejected.
+LEGACY_SUMMARY_OPTION_IDS = {
+    "short": "enkel",
+    "extensive": "utforlig",
+}
+
+# Used only if the prompt policy cannot be read or contains no usable options.
+FALLBACK_SUMMARY_OPTION_ID = "standard"
+FALLBACK_SUMMARY_PROMPT = (
+    "Sammanfatta följande transkribering på ett tydligt och sakligt sätt. "
+    "Hitta inte på information. Om något är oklart, skriv att det är oklart."
+)
+
+_SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?:…])\s+")
+_PARAGRAPH_BOUNDARY_RE = re.compile(r"\n\s*\n")
+
+_CONTEXT_ERROR_MARKERS = (
+    "context_length_exceeded",
+    "maximum context length",
+    "context length",
+    "too many tokens",
+    "reduce the length",
+    "string too long",
+)
+
+# Appended to the user's own instruction when a transcription has to be
+# processed in several passes.
+MAP_STAGE_SUFFIX = (
+    "ARBETSSÄTT FÖR DETTA STEG:\n"
+    "Transkriberingen är för lång för att behandlas i ett svep och du får just nu "
+    "bara en del av den. Följ instruktionerna ovan, men tillämpa dem enbart på det "
+    "avsnitt du fått. Var utförlig och behåll detaljer, exempel och citat – detta är "
+    "ett underlag som senare ska vävas ihop med underlag från övriga delar. "
+    "Skriv ingen inledning och inga slutsatser om helheten."
+)
+
+REDUCE_STAGE_SUFFIX = (
+    "ARBETSSÄTT FÖR DETTA STEG:\n"
+    "Nedan följer flera underlag från samma transkribering, i kronologisk ordning. "
+    "Väv ihop dem till en enda sammanhängande text som följer instruktionerna ovan. "
+    "Slå ihop teman som återkommer i flera underlag i stället för att upprepa dem, "
+    "men behåll detaljer, exempel och citat. Texten ska läsas som om den skrivits "
+    "utifrån hela transkriberingen på en gång: nämn inte att materialet varit uppdelat "
+    "och hänvisa inte till 'del 1', 'del 2' och så vidare."
+)
 
 # Temperature settings
 DEFAULT_TEMPERATURE = 0.7
@@ -50,7 +139,37 @@ EXTRA_MODEL_OPTIONS = {
 RESAMPLING_TARGET_RATE = 16000
 
 logger = JBGLogger(level="DEBUG").logger
-    
+
+
+class ApproximateEncoder:
+    """Minimal stand-in for a tiktoken encoding.
+
+    Used only when tiktoken cannot load its BPE data, for example when outbound
+    network access is blocked. It splits on whitespace boundaries so that
+    encode/decode round-trips preserve the text exactly, and deliberately
+    over-estimates token counts so that segments stay inside the real budget.
+
+    Swedish text tokenizes less efficiently than English, so roughly three
+    tokens per whitespace-separated word is a safe upper bound.
+    """
+
+    APPROX_TOKENS_PER_WORD = 3
+
+    def encode(self, text):
+        if not text:
+            return []
+        # One "token" per unit of the estimate, carrying the text in the first.
+        words = text.split()
+        return [0] * max(1, len(words) * self.APPROX_TOKENS_PER_WORD)
+
+    def decode(self, tokens):
+        # Only used by the hard-split path for text without sentence
+        # boundaries, which cannot be reconstructed from this estimate.
+        raise NotImplementedError(
+            "ApproximateEncoder cannot decode; token-level splitting is unavailable."
+        )
+
+
 class JBGtranscriber():
     
     # Standard Settings
@@ -99,13 +218,107 @@ class JBGtranscriber():
         self.follow_up_questions = ""
         self.analyze_speakers = ""
 
-    def load_prompt_policy(self):
+    # Resolved from the package location rather than the current working
+    # directory, so the policy is found regardless of how the app is started.
+    POLICY_PATH = Path(__file__).resolve().parent.parent / "policy" / "prompt_policy.json"
+
+    @staticmethod
+    def load_policy_file():
+        """Load the prompt policy from disk. Returns an empty dict on failure."""
         try:
-            with open("policy/prompt_policy.json", "r", encoding="utf-8") as f:
+            with open(JBGtranscriber.POLICY_PATH, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
             logger.error(f" Could not load prompt policy: {e}")
             return {}
+
+    @staticmethod
+    def policy_text(policy, key, default=""):
+        """Return a policy entry as a single string.
+
+        Entries are written either as a plain string or as a list of lines.
+        Joining a string with "\\n".join() would insert a newline between every
+        character, so the type has to be checked before joining.
+        """
+        value = policy.get(key, default)
+        if isinstance(value, (list, tuple)):
+            return "\n".join(str(line) for line in value)
+        return str(value)
+
+    @classmethod
+    def summary_options(cls, policy=None):
+        """Return the selectable summary options, in display order.
+
+        Each option is a dict with id, label, description, default and prompt.
+        The list is the single source of truth for both the GUI dropdown and
+        the server-side validation of the chosen option.
+        """
+        policy = policy if policy is not None else cls.load_policy_file()
+        raw = policy.get("summary_options") or []
+
+        options = []
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            option_id = str(entry.get("id", "")).strip()
+            prompt = cls.policy_text(entry, "prompt")
+            if not option_id or not prompt.strip():
+                continue
+            options.append({
+                "id": option_id,
+                "label": str(entry.get("label") or option_id),
+                "description": str(entry.get("description") or ""),
+                "default": bool(entry.get("default")),
+                "prompt": prompt,
+            })
+
+        if not options:
+            logger.error(
+                "No usable summary options in the prompt policy. "
+                "Falling back to a single built-in instruction."
+            )
+            options = [{
+                "id": FALLBACK_SUMMARY_OPTION_ID,
+                "label": "Standard",
+                "description": "",
+                "default": True,
+                "prompt": FALLBACK_SUMMARY_PROMPT,
+            }]
+
+        if not any(o["default"] for o in options):
+            logger.warning(
+                "No summary option is marked as default; using the first one."
+            )
+            options[0]["default"] = True
+
+        return options
+
+    @classmethod
+    def resolve_summary_option_id(cls, option_id, options=None):
+        """Map a requested option id onto an existing one.
+
+        Ids that no longer exist fall back to the default option rather than
+        failing, so a stale value stored in a browser does not break the run.
+        """
+        options = options if options is not None else cls.summary_options()
+        known = {o["id"] for o in options}
+
+        candidate = (option_id or "").strip()
+        candidate = LEGACY_SUMMARY_OPTION_IDS.get(candidate, candidate)
+
+        if candidate in known:
+            return candidate
+
+        default_id = next(o["id"] for o in options if o["default"])
+        if candidate:
+            logger.warning(
+                f"Unknown summary option '{option_id}'; using default '{default_id}'."
+            )
+        return default_id
+
+    def load_prompt_policy(self):
+        return JBGtranscriber.load_policy_file()
+
     
     @staticmethod
     def do_nvidia_check(preferred_device):
@@ -186,7 +399,19 @@ class JBGtranscriber():
                 f"tiktoken.encoding_for_model('{self.openai_model}') failed, "
                 "falling back to o200k_base encoding."
             )
+
+        try:
             return tiktoken.get_encoding("o200k_base")
+        except Exception as e:
+            # tiktoken downloads its BPE files on first use. In a locked-down
+            # network this fails, and without a fallback the whole summary step
+            # would fail with it. An approximate encoder keeps segmentation
+            # working; it only needs to be good enough to decide where to split.
+            logger.warning(
+                f"Could not load any tiktoken encoding ({e}). "
+                "Falling back to an approximate character-based token estimate."
+            )
+            return ApproximateEncoder()
 
     def get_transcription_cache_path(self):
         """Generate a cache filename based on the audio file's full path (hashed)."""
@@ -236,74 +461,221 @@ class JBGtranscriber():
 
         return completion.choices[0].message
 
-    def generate_summary(self, style="short"):
-        
-        """Genererar en sammanfattning baserat på vald stil ('short' eller 'extensive')."""
-        if style == "extensive":
-            self.generate_summary_splitted()
-        else:
-            system_message = self.prompt_policy.get("short_summary", "Sammanfatta detta:")
-            try:
-                self.summary = self.call_openai(
-                    instructions=system_message,
-                    input_message=self.transcription
-                ).content
-            except Exception as e:
-                logger.error(f" Summary generation failed: {e}")
-                self.summary = "Sammanfattning var inte tillgänglig"
-                
-    def generate_summary_splitted(self):
+    def resolve_summary_instructions(self, style=None, custom_prompt=None):
+        """Decide which instruction text to use for the summary.
 
-        logger.info(f"Starting segmented summary generation...")
+        A non-empty custom prompt from the user always wins. Otherwise the
+        instruction belonging to the chosen option is taken from the prompt
+        policy, falling back to the default option.
+        """
+        candidate = (custom_prompt or "").strip()
+        if candidate:
+            if len(candidate) > MAX_SUMMARY_PROMPT_CHARS:
+                logger.warning(
+                    f"Summary instruction truncated from {len(candidate)} to "
+                    f"{MAX_SUMMARY_PROMPT_CHARS} characters."
+                )
+                candidate = candidate[:MAX_SUMMARY_PROMPT_CHARS]
+            logger.info(f"Using user-supplied summary instruction ({len(candidate)} characters).")
+            return candidate
 
-        enc = self._get_encoder_for_segmentation()
-        logger.debug(f"Investigated tiktoken encoding...")
+        options = JBGtranscriber.summary_options(self.prompt_policy)
+        option_id = JBGtranscriber.resolve_summary_option_id(style, options)
+        option = next(o for o in options if o["id"] == option_id)
+        logger.info(f"Using default summary instruction for option '{option_id}'.")
+        return option["prompt"]
 
-        segments = self._split_into_segments(self.transcription, enc)
-        logger.debug(f"Split text into segments...")
+    def generate_summary(self, style=None, custom_prompt=None):
+        """Generate a summary using either a default or a user-edited instruction.
 
-        prompt_lines = self.prompt_policy.get("extensive_summary", ["Sammanfatta detta:"])
+        The transcription is sent in one single call whenever it fits inside the
+        model's input budget, since an undivided text gives the best summary.
+        Segmentation is a fallback for genuinely long recordings only.
+        """
+        instructions = self.resolve_summary_instructions(style=style, custom_prompt=custom_prompt)
 
-        instructions = "\n".join(prompt_lines)
-        logger.debug(f"Prompt instructions=",instructions)
-
-        partial_summaries = []
-
-        try:
-            for i, segment in enumerate(segments):
-                if i > 0:
-                    time.sleep(5)  # prevent hitting rate limits
-                logger.info(f" Summarizing segment {i+1}/{len(segments)}...")
-                context_note = f"(Detta är del {i+1} av transkriptionen. Sammanfatta detta avsnitt noggrant.)"
-                result = self.call_openai(instructions=instructions, input_message=context_note + "\n\n" + segment)
-                partial_summaries.append(f"### Sammanfattning av del {i+1}:\n{result.content.strip()}")
-        except Exception as e:
-            logger.error(f" Failed to summarize segment: {e}")
-            self.summary = "Sammanfattning misslyckades"
+        if not (self.transcription or "").strip():
+            logger.warning("No transcription available to summarize.")
+            self.summary = "Sammanfattning var inte tillgänglig"
             return
 
-        # Step 1: Seamless compilation
-        compiled_summary = "\n\n".join(partial_summaries)
-
-        # Step 2: Generate short wrap-up summary
-        logger.info(f"[INFO] Generating short summary as concluding wrap-up...")
         try:
-            short_prompt = "\n".join(self.prompt_policy.get("short_summary", ["Sammanfatta detta:"]))
-            final_wrapup = self.call_openai(
-                instructions=short_prompt,
-                input_message=compiled_summary
-            ).content.strip()
+            self.summary = self._summarize(instructions)
         except Exception as e:
-            logger.warning(f" Short summary step failed: {e}")
-            final_wrapup = "Kort sammanfattning kunde inte genereras."
+            logger.error(f" Summary generation failed: {e}")
+            self.summary = "Sammanfattning var inte tillgänglig"
 
-        # Final result: seamless segments + wrap-up
-        self.summary = compiled_summary + "\n\n### Kort sammanfattning:\n" + final_wrapup
+    def _summarize(self, instructions):
+        """Run the summary, lowering the token budget if the API rejects the size."""
+
+        enc = self._get_encoder_for_segmentation()
+        budget = self._resolve_input_token_budget()
+        downshifts = 0
+
+        while True:
+            available = self._available_input_tokens(instructions, enc, budget)
+            segments = self._split_into_segments(self.transcription, enc, max_tokens=available)
+
+            try:
+                if len(segments) == 1:
+                    logger.info(
+                        "Transkriberingen ryms i ett anrop - sammanfattar hela texten på en gång."
+                    )
+                    return self.call_openai(
+                        instructions=instructions,
+                        input_message=self.transcription,
+                    ).content.strip()
+
+                logger.info(
+                    f"Transkriberingen delas i {len(segments)} segment "
+                    f"(budget {available} tokens per segment)."
+                )
+                return self._summarize_in_segments(instructions, segments, enc, available)
+
+            except Exception as e:
+                if downshifts < MAX_BUDGET_DOWNSHIFTS and JBGtranscriber._is_context_length_error(e):
+                    downshifts += 1
+                    budget = max(MIN_MAX_INPUT_TOKENS, budget // 2)
+                    logger.warning(
+                        f"Modellen rapporterade att kontextfönstret överskreds. "
+                        f"Sänker budgeten till {budget} tokens och försöker igen "
+                        f"(försök {downshifts}/{MAX_BUDGET_DOWNSHIFTS})."
+                    )
+                    continue
+                raise
+
+    def _summarize_in_segments(self, instructions, segments, enc, available_tokens):
+        """Summarize each segment, then merge the results into one coherent text."""
+
+        map_instructions = instructions + "\n\n" + MAP_STAGE_SUFFIX
+        partials = []
+
+        for i, segment in enumerate(segments):
+            if i > 0:
+                time.sleep(SEGMENT_PAUSE_SECONDS)
+            logger.info(f" Summarizing segment {i+1}/{len(segments)}...")
+            context_note = (
+                f"(Detta är del {i+1} av {len(segments)} av transkriberingen.)"
+            )
+            result = self.call_openai(
+                instructions=map_instructions,
+                input_message=context_note + "\n\n" + segment,
+            )
+            partials.append(result.content.strip())
+
+        return self._reduce_partial_summaries(instructions, partials, enc, available_tokens)
+
+    def _reduce_partial_summaries(self, instructions, partials, enc, available_tokens):
+        """Merge partial summaries into one text, folding in several passes if needed."""
+
+        reduce_instructions = instructions + "\n\n" + REDUCE_STAGE_SUFFIX
+        round_number = 0
+
+        while len(partials) > 1:
+            round_number += 1
+            groups = self._group_partials_to_fit(partials, enc, available_tokens)
+
+            # Safety net: if a single partial cannot be grouped with anything
+            # else, further folding will not converge. Concatenate instead of
+            # looping forever.
+            if len(groups) >= len(partials):
+                logger.warning(
+                    "Delunderlagen kan inte slås ihop ytterligare inom budgeten. "
+                    "Sammanfogar dem direkt."
+                )
+                return "\n\n".join(partials)
+
+            logger.info(
+                f" Reduce-steg {round_number}: slår ihop {len(partials)} underlag "
+                f"till {len(groups)}."
+            )
+
+            merged = []
+            for i, group in enumerate(groups):
+                if i > 0 or round_number > 1:
+                    time.sleep(SEGMENT_PAUSE_SECONDS)
+                body = "\n\n".join(
+                    f"--- Underlag {j+1} av {len(group)} ---\n{part}"
+                    for j, part in enumerate(group)
+                )
+                merged.append(
+                    self.call_openai(
+                        instructions=reduce_instructions,
+                        input_message=body,
+                    ).content.strip()
+                )
+            partials = merged
+
+        return partials[0] if partials else ""
+
+    def _group_partials_to_fit(self, partials, enc, available_tokens):
+        """Pack partial summaries into groups that each fit the input budget."""
+
+        groups = []
+        current = []
+        current_tokens = 0
+
+        for part in partials:
+            part_tokens = len(self._tokenize(part, enc))
+            if current and current_tokens + part_tokens > available_tokens:
+                groups.append(current)
+                current, current_tokens = [], 0
+            current.append(part)
+            current_tokens += part_tokens
+
+        if current:
+            groups.append(current)
+        return groups
+
+    @staticmethod
+    def _is_context_length_error(error):
+        """Detect an API error caused by exceeding the model's context window."""
+        message = str(error).lower()
+        return any(marker in message for marker in _CONTEXT_ERROR_MARKERS)
+
+    def _resolve_input_token_budget(self):
+        """Resolve the input token budget for the configured OpenAI model."""
+
+        override = os.getenv("JBG_MAX_INPUT_TOKENS")
+        if override:
+            try:
+                resolved = max(MIN_MAX_INPUT_TOKENS, int(override))
+                logger.info(f"Input token budget set to {resolved} by JBG_MAX_INPUT_TOKENS.")
+                return resolved
+            except ValueError:
+                logger.warning(
+                    f"Ignoring invalid JBG_MAX_INPUT_TOKENS value: {override!r}"
+                )
+
+        model = (self.openai_model or "").lower()
+        best_budget = None
+        best_prefix_length = -1
+        for prefix, budget in MODEL_INPUT_TOKEN_BUDGETS.items():
+            if model.startswith(prefix) and len(prefix) > best_prefix_length:
+                best_budget, best_prefix_length = budget, len(prefix)
+
+        if best_budget is None:
+            logger.info(
+                f"No token budget configured for model '{self.openai_model}'. "
+                f"Using default {DEFAULT_MAX_INPUT_TOKENS}; it will be lowered "
+                "automatically if the model rejects the request."
+            )
+            return DEFAULT_MAX_INPUT_TOKENS
+
+        return best_budget
+
+    def _available_input_tokens(self, instructions, enc, budget):
+        """Tokens left for transcription content once instructions and answer are reserved."""
+        instruction_tokens = len(self._tokenize(instructions, enc))
+        available = budget - instruction_tokens - RESERVED_RESPONSE_TOKENS
+        return max(MIN_MAX_INPUT_TOKENS, available)
 
     def find_suspicious_phrases(self):
         """Identifierar och markerar osannolika eller grammatiskt tveksamma ordkombinationer."""
         try:
-            prompt = "\n".join(self.prompt_policy.get("suspicious_phrases", [])) + "\n" + self.transcription
+            prompt = JBGtranscriber.policy_text(
+                self.prompt_policy, "suspicious_phrases"
+            ) + "\n" + self.transcription
             self.marked_text = self.call_openai_simple(prompt).content
         except Exception as e:
             logger.error(f"An error occurred while finding suspicious phrases: {e}")
@@ -312,7 +684,9 @@ class JBGtranscriber():
     def suggest_follow_up_questions(self):
         """Föreslår fem relevanta uppföljningsfrågor baserat på transkriberingen."""
         try:
-            prompt = self.prompt_policy.get("follow_up_questions", "Generera uppföljningsfrågor:") + "\n" + self.transcription
+            prompt = JBGtranscriber.policy_text(
+                self.prompt_policy, "follow_up_questions", "Generera uppföljningsfrågor:"
+            ) + "\n" + self.transcription
             self.follow_up_questions = self.call_openai_simple(prompt).content
         except Exception as e:
             logger.error(f"An error occurred while generating follow-up questions: {e}")
@@ -321,9 +695,11 @@ class JBGtranscriber():
     def do_analyze_speakers(self):
         """Analysera transkriberingen med avseende på vilka talare som säger vad"""
         
-        prompt = "\n".join(self.prompt_policy.get("speaker_diarization", [
-            "Försök att identifiera olika röster i följande transkribering:"
-        ]))
+        prompt = JBGtranscriber.policy_text(
+            self.prompt_policy,
+            "speaker_diarization",
+            "Försök att identifiera olika röster i följande transkribering:",
+        )
         
         input_message = f"""
             ------------------------
@@ -341,21 +717,26 @@ class JBGtranscriber():
         
         # Setup encoder for model
         enc = self._get_encoder_for_segmentation()
-        
-        # Tokenize once to decide if we actually need to segment
-        tokens = self._tokenize(self.transcription, enc)
 
-        if len(tokens) <= MAX_INPUT_TOKENS:
-            # Allt får plats i ett enda segment – använd enkel-varianten
-            segments = [self.transcription]
-        else:
-            # För talaranalys vill vi undvika överlappade segment för att slippa duplikationer
-            segments = self._split_into_segments(
-                self.transcription,
-                enc,
-                max_tokens=MAX_INPUT_TOKENS,
-                overlap=0,  # viktigt: ingen överlapp för diarization
-            )
+        # The same model-aware budget is used here, so diarization is normally
+        # done in a single call as well. That keeps speaker numbering consistent
+        # across the whole interview.
+        prompt_text = JBGtranscriber.policy_text(
+            self.prompt_policy,
+            "speaker_diarization",
+            "Försök att identifiera olika röster i följande transkribering:",
+        )
+        available = self._available_input_tokens(
+            prompt_text, enc, self._resolve_input_token_budget()
+        )
+
+        # För talaranalys vill vi undvika överlappade segment för att slippa duplikationer
+        segments = self._split_into_segments(
+            self.transcription,
+            enc,
+            max_tokens=available,
+            overlap_sentences=0,  # viktigt: ingen överlapp för diarization
+        )
         
         # No need to split text into segments
         if len(segments) == 1:
@@ -363,9 +744,11 @@ class JBGtranscriber():
         else:
             # Text resulted in multiple segments
             diarized_segments = []
-            prompt = "\n".join(self.prompt_policy.get("speaker_diarization", [
-                "Försök att identifiera olika röster i följande transkribering:"
-            ]))
+            prompt = JBGtranscriber.policy_text(
+                self.prompt_policy,
+                "speaker_diarization",
+                "Försök att identifiera olika röster i följande transkribering:",
+            )
 
             try:
                 for i, segment in enumerate(segments):
@@ -424,15 +807,112 @@ class JBGtranscriber():
 
         return "\n\n".join(cleaned)
 
-    def _split_into_segments(self, text, enc, max_tokens=MAX_INPUT_TOKENS, overlap=OVERLAP_TOKENS):
-        tokens = self._tokenize(text, enc)
+    def _split_into_atoms(self, text):
+        """Split text into the smallest units a segment boundary may fall between.
+
+        Paragraphs are preferred, sentences are used inside them. Trailing
+        whitespace is carried on each atom so the text can be reassembled
+        without loss.
+        """
+        atoms = []
+        paragraphs = [p for p in _PARAGRAPH_BOUNDARY_RE.split(text) if p.strip()]
+
+        for paragraph in paragraphs:
+            sentences = [s for s in _SENTENCE_BOUNDARY_RE.split(paragraph.strip()) if s.strip()]
+            if not sentences:
+                continue
+            for index, sentence in enumerate(sentences):
+                is_last = index == len(sentences) - 1
+                atoms.append(sentence.strip() + ("\n\n" if is_last else " "))
+
+        return atoms
+
+    def _enforce_atom_size(self, atoms, enc, max_tokens):
+        """Hard-split any single atom that is larger than the budget on its own.
+
+        Without this, a transcription with no sentence punctuation at all could
+        produce an atom that never fits and the packing loop would not progress.
+        """
+        sized = []
+        for atom in atoms:
+            tokens = self._tokenize(atom, enc)
+            if len(tokens) <= max_tokens:
+                sized.append((atom, len(tokens)))
+                continue
+
+            logger.warning(
+                f"Ett textblock på {len(tokens)} tokens saknar meningsgränser och "
+                "delas på tokennivå."
+            )
+            try:
+                for start in range(0, len(tokens), max_tokens):
+                    piece_tokens = tokens[start:start + max_tokens]
+                    sized.append((self._detokenize(piece_tokens, enc), len(piece_tokens)))
+            except NotImplementedError:
+                # The approximate encoder cannot reconstruct text from tokens,
+                # so split on words instead and re-measure each piece.
+                words = atom.split()
+                if not words:
+                    continue
+                # One extra piece as margin, since a word-based split cannot
+                # land exactly on the token budget.
+                pieces = max(1, -(-len(tokens) // max_tokens)) + 1
+                per_piece = max(1, -(-len(words) // pieces))
+                for start in range(0, len(words), per_piece):
+                    piece = " ".join(words[start:start + per_piece]) + " "
+                    sized.append((piece, len(self._tokenize(piece, enc))))
+
+        return sized
+
+    def _split_into_segments(self, text, enc, max_tokens=None,
+                             overlap_sentences=SEGMENT_OVERLAP_SENTENCES):
+        """Split a transcription into segments that each fit the token budget.
+
+        Returns the text unchanged as a single segment whenever it fits, which
+        is the common case with current context windows. Boundaries are placed
+        between sentences rather than at arbitrary token offsets, and a small
+        sentence overlap preserves context across a boundary.
+        """
+        if max_tokens is None:
+            max_tokens = self._resolve_input_token_budget()
+
+        total_tokens = len(self._tokenize(text, enc))
+        if total_tokens <= max_tokens:
+            logger.info(
+                f"Text has {total_tokens} tokens and fits within the budget of "
+                f"{max_tokens} tokens - no segmentation needed."
+            )
+            return [text]
+
+        sized_atoms = self._enforce_atom_size(self._split_into_atoms(text), enc, max_tokens)
+        if not sized_atoms:
+            return [text]
+
         segments = []
-        i = 0
-        while i < len(tokens):
-            segment = tokens[i:i + max_tokens]
-            segments.append(self._detokenize(segment, enc))
-            i += max_tokens - overlap
-        logger.info(f"Text has {len(tokens)} tokens and results in {len(segments)} segments")
+        current = []
+        current_tokens = 0
+
+        for atom, atom_tokens in sized_atoms:
+            if current and current_tokens + atom_tokens > max_tokens:
+                segments.append("".join(a for a, _ in current).strip())
+
+                carry = current[-overlap_sentences:] if overlap_sentences > 0 else []
+                carry_tokens = sum(t for _, t in carry)
+                # Drop the overlap if it would leave no room for new content.
+                if carry_tokens + atom_tokens > max_tokens:
+                    carry, carry_tokens = [], 0
+                current, current_tokens = list(carry), carry_tokens
+
+            current.append((atom, atom_tokens))
+            current_tokens += atom_tokens
+
+        if current:
+            segments.append("".join(a for a, _ in current).strip())
+
+        logger.info(
+            f"Text has {total_tokens} tokens and results in {len(segments)} segments "
+            f"(budget {max_tokens} tokens, {overlap_sentences} sentences overlap)"
+        )
         return segments
 
     
@@ -925,7 +1405,8 @@ class JBGtranscriber():
     def perform_transcription_steps(
         self,
         generate_summary=False,
-        summary_style="short",
+        summary_style=None,
+        summary_prompt=None,
         find_suspicious_phrases=False,
         suggest_follow_up_questions=False,
         analyze_speakers=False,
@@ -948,7 +1429,7 @@ class JBGtranscriber():
         # Generate a summary if requested
         if generate_summary:
             report(f"Genererar sammanfattning...")
-            self.generate_summary(style=summary_style)
+            self.generate_summary(style=summary_style, custom_prompt=summary_prompt)
         
         # Find and mark suspicious phrases if requested
         if find_suspicious_phrases:
@@ -977,14 +1458,17 @@ class JBGtranscriber():
 def check_script_arguments():
     """Check command-line arguments for the test script""" 
     if len(sys.argv) < 6:
-        sys.exit("Usage: " + sys.argv[0] + " [path to .mp3 file or folder] [output folder] [device=gpu/cpu] [openai_api_key] (optional: model)")
+        sys.exit("Usage: " + sys.argv[0] + " [path to .mp3 file or folder] [output folder] [device=gpu/cpu] [openai_api_key] (optional: model) (optional: summary style)")
 
     convert_path = Path(sys.argv[1])
     export_path = Path(sys.argv[2])
     device = sys.argv[3].lower()
     api_key = sys.argv[4]
     model = sys.argv[5] if len(sys.argv) > 5 else "gpt-4o"
-    summary_style = sys.argv[6] if len(sys.argv) > 6 else "short"
+    summary_options = JBGtranscriber.summary_options()
+    valid_styles = [o["id"] for o in summary_options]
+    default_style = next(o["id"] for o in summary_options if o["default"])
+    summary_style = sys.argv[6] if len(sys.argv) > 6 else default_style
 
     if not convert_path.exists():
         sys.exit(f"{convert_path} is not a valid file or directory path")
@@ -992,8 +1476,8 @@ def check_script_arguments():
         sys.exit(f"{export_path} is not a valid directory path")
     if device not in ["cpu", "gpu"]:
         sys.exit("Device must be 'cpu' or 'gpu'")
-    if summary_style not in ["short", "extensive"]:
-        sys.exit("Summary style must be 'short' or 'extensive'")
+    if summary_style not in valid_styles and summary_style not in LEGACY_SUMMARY_OPTION_IDS:
+        sys.exit("Summary style must be one of: " + ", ".join(valid_styles))
 
     return convert_path, export_path, device, api_key, model, summary_style
 

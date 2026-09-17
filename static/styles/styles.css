@@ -101,6 +101,137 @@ form button:disabled:hover {
     margin-bottom: 1.5rem;
 }
 
+/* === Redigerbar sammanfattningsinstruktion === */
+.summary-options {
+    margin: 0.5rem 0 0 1.5rem;
+    padding-left: 0.75rem;
+    border-left: 3px solid #d9e3ec;
+}
+
+.summary-options[hidden] {
+    display: none;
+}
+
+.summary-style-choice {
+    margin-bottom: 0.5rem;
+}
+
+.summary-style-choice label {
+    display: block;
+    margin-bottom: 0.25rem;
+    font-size: 0.85rem;
+    color: #555;
+}
+
+#summaryStyle {
+    display: block;
+    width: 100%;
+    max-width: 260px;
+    padding: 0.35rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 0.9rem;
+    color: #333;
+    background-color: #fff;
+}
+
+#summaryStyle:focus {
+    outline: 2px solid #005293;
+    outline-offset: 1px;
+}
+
+#summaryStyle:disabled {
+    background-color: #f2f2f2;
+    color: #777;
+}
+
+/* Narrow screens: the indent costs more than it communicates. */
+@media (max-width: 480px) {
+    .summary-options {
+        margin-left: 0.5rem;
+        padding-left: 0.5rem;
+    }
+}
+
+.summary-options > label[for="summaryPrompt"] {
+    display: block;
+    margin-bottom: 0.35rem;
+    font-size: 0.85rem;
+    color: #555;
+}
+
+#summaryPrompt {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.5rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 0.85rem;
+    line-height: 1.45;
+    color: #333;
+    background-color: #fff;
+    resize: vertical;
+}
+
+#summaryPrompt:focus {
+    outline: 2px solid #005293;
+    outline-offset: 1px;
+    border-color: #005293;
+}
+
+#summaryPrompt:disabled {
+    background-color: #f2f2f2;
+    color: #777;
+}
+
+.summary-prompt-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.75rem;
+    margin-top: 0.35rem;
+}
+
+.summary-prompt-state {
+    font-size: 0.8rem;
+    color: #666;
+}
+
+.summary-prompt-state[hidden] {
+    display: none;
+}
+
+.link-button {
+    padding: 0;
+    background: none;
+    border: none;
+    color: #005293;
+    font-size: 0.8rem;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.link-button:hover {
+    background: none;
+    box-shadow: none;
+    color: #003e73;
+}
+
+.link-button[hidden] {
+    display: none;
+}
+
+.link-button:disabled,
+.link-button[disabled] {
+    background: none;
+    color: #888;
+    opacity: 0.7;
+    text-decoration: none;
+}
+
 /* === Information om resultatfil === */
 .result-info {
     margin-top: 1rem;

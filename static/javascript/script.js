@@ -1,6 +1,203 @@
 // ✅ On page load: enable/disable fields based on API key presence
 let globalEncryptionKeyBase64 = "";
 
+// --- Editable summary instruction -------------------------------------------
+// The two default texts ("Enkel" and "Utförlig") are fetched from the backend so
+// that policy/prompt_policy.json stays the single source of truth. The user may
+// edit the text freely; an edited text is remembered between visits.
+
+const SUMMARY_PROMPT_STORAGE_KEY = "jbg_summary_prompt";
+const SUMMARY_STYLE_STORAGE_KEY = "jbg_summary_style";
+
+// Option ids retired in an earlier version. Browsers still hold these, so a
+// stored value is mapped rather than silently falling back to the default.
+const LEGACY_SUMMARY_STYLE_IDS = { short: "enkel", extensive: "utforlig" };
+
+let summaryOptions = [];              // [{id, label, description, default, prompt}]
+let summaryPromptMaxLength = 20000;
+let summaryOptionsLoaded = false;
+
+function currentSummaryStyle() {
+    return document.getElementById("summaryStyle").value || "";
+}
+
+function summaryOptionById(id) {
+    return summaryOptions.find(o => o.id === id) || null;
+}
+
+function defaultSummaryPromptFor(id) {
+    const option = summaryOptionById(id);
+    return option ? option.prompt : "";
+}
+
+function summaryStyleLabel(id) {
+    const option = summaryOptionById(id);
+    return option ? option.label : id;
+}
+
+function isSummaryPromptEdited() {
+    const textarea = document.getElementById("summaryPrompt");
+    return textarea.value.trim() !== defaultSummaryPromptFor(currentSummaryStyle()).trim();
+}
+
+function matchesAnySummaryDefault(text) {
+    const trimmed = (text || "").trim();
+    return summaryOptions.some(o => o.prompt.trim() === trimmed);
+}
+
+function refreshSummaryStyleDescription() {
+    // The description is carried by the tooltip on the select and on each
+    // option; there is no separate visible line.
+    const option = summaryOptionById(currentSummaryStyle());
+    const select = document.getElementById("summaryStyle");
+    const description = option ? option.description : "";
+    if (description) {
+        select.title = description;
+    } else {
+        select.removeAttribute("title");
+    }
+}
+
+function refreshSummaryPromptState() {
+    const state = document.getElementById("summaryPromptState");
+    const resetButton = document.getElementById("resetSummaryPrompt");
+
+    if (!summaryOptionsLoaded) {
+        state.textContent = "Standardtexterna kunde inte hämtas. Skriv en egen instruktion, annars används serverns standardtext.";
+        state.hidden = false;
+        resetButton.hidden = true;
+        return;
+    }
+
+    // Nothing is shown while a default text is in place - that is the normal
+    // case and needs no label. An edited instruction is still called out,
+    // since it is the state the user could otherwise forget they are in.
+    if (isSummaryPromptEdited()) {
+        state.textContent = "Egen text används.";
+        state.hidden = false;
+        resetButton.hidden = false;
+    } else {
+        state.textContent = "";
+        state.hidden = true;
+        resetButton.hidden = true;
+    }
+}
+
+function applySummaryDefault(id) {
+    document.getElementById("summaryPrompt").value = defaultSummaryPromptFor(id);
+    storeSummaryPrompt();
+    refreshSummaryStyleDescription();
+    refreshSummaryPromptState();
+}
+
+function storeSummaryPrompt() {
+    try {
+        localStorage.setItem(SUMMARY_PROMPT_STORAGE_KEY, document.getElementById("summaryPrompt").value);
+        localStorage.setItem(SUMMARY_STYLE_STORAGE_KEY, currentSummaryStyle());
+    } catch (err) {
+        console.warn("Kunde inte spara sammanfattningsinstruktionen lokalt:", err);
+    }
+}
+
+function populateSummaryStyleSelect() {
+    const select = document.getElementById("summaryStyle");
+    select.innerHTML = "";
+    summaryOptions.forEach(option => {
+        const el = document.createElement("option");
+        el.value = option.id;
+        el.textContent = option.label;
+        if (option.description) el.title = option.description;
+        if (option.default) el.selected = true;
+        select.appendChild(el);
+    });
+}
+
+function setUpSummaryPromptEditor() {
+    const textarea = document.getElementById("summaryPrompt");
+    const resetButton = document.getElementById("resetSummaryPrompt");
+    const select = document.getElementById("summaryStyle");
+
+    textarea.addEventListener("input", () => {
+        if (textarea.value.length > summaryPromptMaxLength) {
+            textarea.value = textarea.value.slice(0, summaryPromptMaxLength);
+        }
+        storeSummaryPrompt();
+        refreshSummaryPromptState();
+    });
+
+    resetButton.addEventListener("click", () => {
+        applySummaryDefault(currentSummaryStyle());
+        textarea.focus();
+    });
+
+    // Remembered so the selection can be restored if the user cancels.
+    let previousStyle = null;
+
+    select.addEventListener("focus", () => { previousStyle = select.value; });
+
+    select.addEventListener("change", () => {
+        const newStyle = select.value;
+        const edited = !matchesAnySummaryDefault(textarea.value) && textarea.value.trim() !== "";
+
+        if (edited) {
+            const proceed = confirm(
+                `Din egen text ersätts av standardtexten för ${summaryStyleLabel(newStyle)}. Vill du fortsätta?`
+            );
+            if (!proceed) {
+                if (previousStyle !== null) select.value = previousStyle;
+                refreshSummaryStyleDescription();
+                refreshSummaryPromptState();
+                return;
+            }
+        }
+
+        previousStyle = newStyle;
+        applySummaryDefault(newStyle);
+    });
+
+    fetch("/summary_prompts")
+        .then(res => res.json())
+        .then(data => {
+            summaryOptions = Array.isArray(data.options) ? data.options : [];
+            summaryPromptMaxLength = data.max_length || summaryPromptMaxLength;
+            summaryOptionsLoaded = summaryOptions.length > 0;
+
+            if (!summaryOptionsLoaded) {
+                refreshSummaryPromptState();
+                return;
+            }
+
+            populateSummaryStyleSelect();
+
+            let savedStyle = localStorage.getItem(SUMMARY_STYLE_STORAGE_KEY);
+            if (savedStyle && LEGACY_SUMMARY_STYLE_IDS[savedStyle]) {
+                savedStyle = LEGACY_SUMMARY_STYLE_IDS[savedStyle];
+            }
+            if (savedStyle && summaryOptionById(savedStyle)) {
+                select.value = savedStyle;
+            }
+            previousStyle = select.value;
+
+            // A stored text that matches one of the defaults is not a custom
+            // instruction; it is just the default the user last looked at.
+            const savedPrompt = localStorage.getItem(SUMMARY_PROMPT_STORAGE_KEY);
+            const hasCustomText =
+                savedPrompt !== null &&
+                savedPrompt.trim() !== "" &&
+                !matchesAnySummaryDefault(savedPrompt);
+
+            textarea.value = hasCustomText ? savedPrompt : defaultSummaryPromptFor(select.value);
+
+            refreshSummaryStyleDescription();
+            refreshSummaryPromptState();
+        })
+        .catch(err => {
+            console.warn("Kunde inte hämta standardtexter för sammanfattning:", err);
+            summaryOptionsLoaded = false;
+            refreshSummaryPromptState();
+        });
+}
+
 fetch("/config")
   .then(res => res.json())
   .then(data => {
@@ -34,15 +231,18 @@ document.addEventListener("DOMContentLoaded", () => {
         checkboxes.forEach(cb => cb.disabled = !hasKey);
     });
 
-    // Summary checkbox: toggle radio buttons for style
+    // Summary checkbox: reveal the style choice and the editable instruction
     const summaryCheckbox = document.getElementById("optSummary");
     const summaryOptions = document.getElementById("summaryOptions");
 
     summaryCheckbox.addEventListener("change", () => {
         const show = summaryCheckbox.checked;
-        summaryOptions.style.display = show ? "block" : "none";
-        document.querySelectorAll('input[name="summaryStyle"]').forEach(rb => rb.disabled = !show);
+        summaryOptions.hidden = !show;
+        document.getElementById("summaryStyle").disabled = !show;
+        document.getElementById("summaryPrompt").disabled = !show;
     });
+
+    setUpSummaryPromptEditor();
 
     // Show currently logged-in Azure AD user (if available)
     fetch("/me")
@@ -82,6 +282,9 @@ async function uploadFile() {
     document.getElementById("apiKey").disabled = true;
     document.getElementById("modelSelect").disabled = true;
     document.getElementById("optSummary").disabled = true;
+    document.getElementById("summaryPrompt").disabled = true;
+    document.getElementById("resetSummaryPrompt").disabled = true;
+    document.getElementById("summaryStyle").disabled = true;
     document.getElementById("optSuspicious").disabled = true;
     document.getElementById("optQuestions").disabled = true;
     document.getElementById("optSpeakers").disabled = true;
@@ -128,8 +331,14 @@ async function uploadFile() {
 
     formData.append("api_key", document.getElementById("apiKey").value.trim());
     formData.append("model", document.getElementById("modelSelect").value);
-    formData.append("summarize", document.getElementById("optSummary").checked);
-    formData.append("summary_style", document.querySelector('input[name="summaryStyle"]:checked')?.value || "short");
+    const summarizeChecked = document.getElementById("optSummary").checked;
+    formData.append("summarize", summarizeChecked);
+    formData.append("summary_style", currentSummaryStyle());
+    // Empty means "use the server-side default for the chosen style".
+    formData.append(
+        "summary_prompt",
+        summarizeChecked ? document.getElementById("summaryPrompt").value.trim() : ""
+    );
     formData.append("suspicious", document.getElementById("optSuspicious").checked);
     formData.append("questions", document.getElementById("optQuestions").checked);
     formData.append("speakers", document.getElementById("optSpeakers").checked);
