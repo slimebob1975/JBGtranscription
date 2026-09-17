@@ -76,6 +76,48 @@ MAX_INPUT_TOKENS = DEFAULT_MAX_INPUT_TOKENS
 # Upper bound on a user-supplied summary instruction.
 MAX_SUMMARY_PROMPT_CHARS = 20000
 
+# --- Output token budget -----------------------------------------------------
+#
+# Two kinds of work are sent to the model, and they have opposite needs.
+#
+#   Condensing (summary, follow-up questions): the answer is far smaller than
+#   the input, so a large input segment is fine.
+#
+#   Rewriting (suspicious phrases, speaker diarization): the model has to give
+#   the whole text back, marked up. The answer is therefore as large as the
+#   input, and the input segment must be small enough that the answer fits
+#   inside the model's output limit. Otherwise the reply is cut off mid-text
+#   and part of the transcription is silently lost.
+
+DEFAULT_MAX_OUTPUT_TOKENS = 8000
+
+# Longest matching prefix wins, as for the input budgets.
+MODEL_OUTPUT_TOKEN_LIMITS = {
+    "gpt-3.5": 4000,
+    "gpt-4": 4000,
+    "gpt-4o": 16000,
+    "gpt-4.1": 32000,
+    "gpt-5": 32000,
+}
+
+# A rewritten segment is longer than its input: speaker labels, [FEL?] markers
+# and suggested corrections all add tokens. Leave room for that.
+REWRITE_OUTPUT_HEADROOM = 1.4
+
+# Which parameter name a model accepts for the output cap. Newer models reject
+# max_tokens in favour of max_completion_tokens, and the only reliable way to
+# find out is to try. The answer is cached per model so it is tried once.
+_OUTPUT_TOKEN_PARAM_CACHE = {}
+
+_UNSUPPORTED_PARAM_MARKERS = (
+    "unsupported parameter",
+    "unsupported_parameter",
+    "unrecognized request argument",
+    "is not supported with this model",
+    "unknown parameter",
+    "extra fields not permitted",
+)
+
 # Option ids used before the summary options were made configurable. Browsers
 # still hold these in localStorage, and older clients still post them, so they
 # are mapped onto their current equivalents rather than rejected.
@@ -316,6 +358,9 @@ class JBGtranscriber():
             )
         return default_id
 
+    # Set by call_openai: whether the last answer hit the length limit.
+    last_answer_truncated = False
+
     def load_prompt_policy(self):
         return JBGtranscriber.load_policy_file()
 
@@ -440,26 +485,77 @@ class JBGtranscriber():
 
         return completion.choices[0].message
     
-    def call_openai(self, instructions, input_message):
+    @staticmethod
+    def _is_unsupported_parameter_error(error):
+        """True if the API rejected a parameter rather than the request itself."""
+        message = str(error).lower()
+        return any(marker in message for marker in _UNSUPPORTED_PARAM_MARKERS)
+
+    def _create_completion(self, client, messages, max_output_tokens):
+        """Make the call, capping the answer length where the model allows it.
+
+        Models disagree about the parameter name: newer ones reject max_tokens
+        and want max_completion_tokens. The working name is discovered once per
+        model and cached; if neither is accepted the call is made without a cap
+        rather than failing.
+        """
+        base = dict(
+            model=self.openai_model,
+            messages=messages,
+            temperature=JBGtranscriber.get_permitted_temperature(self.openai_model, DEFAULT_TEMPERATURE),
+            **JBGtranscriber.get_model_specific_extra_arguments(self.openai_model),
+        )
+
+        if not max_output_tokens:
+            return client.chat.completions.create(**base)
+
+        cached = _OUTPUT_TOKEN_PARAM_CACHE.get(self.openai_model, "unknown")
+        candidates = [cached] if cached != "unknown" else ["max_completion_tokens", "max_tokens"]
+
+        for param in candidates:
+            if param is None:
+                break
+            try:
+                completion = client.chat.completions.create(**base, **{param: max_output_tokens})
+                _OUTPUT_TOKEN_PARAM_CACHE[self.openai_model] = param
+                return completion
+            except Exception as e:
+                if JBGtranscriber._is_unsupported_parameter_error(e):
+                    logger.info(f"Modellen {self.openai_model} accepterar inte '{param}'.")
+                    continue
+                raise
+
+        _OUTPUT_TOKEN_PARAM_CACHE[self.openai_model] = None
+        logger.warning(
+            f"Modellen {self.openai_model} accepterar ingen gräns för svarslängd. "
+            "Anropet görs utan begränsning."
+        )
+        return client.chat.completions.create(**base)
+
+    def call_openai(self, instructions, input_message, max_output_tokens=None):
         """Anropar OpenAI:s GPT-modell med en given prompt."""
         # TODO: Consider adding reasoning_effort='none' for gpt-5.1 to get GPT-5.1-level intelligence with ultra-low latency.
-        
+
         client = openai.OpenAI(api_key=self.api_key)
 
-        extra_args = JBGtranscriber.get_model_specific_extra_arguments(self.openai_model)
-        logger.info(f"[INFO] Extra args for openai model {self.openai_model}: {str(extra_args)}")
-
-        completion = client.chat.completions.create(
-            model=self.openai_model,
-            messages=[
+        completion = self._create_completion(
+            client,
+            [
                 {"role": "system", "content": instructions},
                 {"role": "user", "content": input_message},
             ],
-            temperature = JBGtranscriber.get_permitted_temperature(self.openai_model, DEFAULT_TEMPERATURE),
-             **extra_args,
+            max_output_tokens,
         )
 
-        return completion.choices[0].message
+        choice = completion.choices[0]
+        self.last_answer_truncated = getattr(choice, "finish_reason", None) == "length"
+        if self.last_answer_truncated:
+            logger.warning(
+                "Modellens svar nådde längdgränsen och kan vara avklippt. "
+                "Sänk segmentstorleken eller höj JBG_MAX_OUTPUT_TOKENS."
+            )
+
+        return choice.message
 
     def resolve_summary_instructions(self, style=None, custom_prompt=None):
         """Decide which instruction text to use for the summary.
@@ -524,6 +620,7 @@ class JBGtranscriber():
                     return self.call_openai(
                         instructions=instructions,
                         input_message=self.transcription,
+                        max_output_tokens=self._resolve_output_token_limit(),
                     ).content.strip()
 
                 logger.info(
@@ -560,6 +657,7 @@ class JBGtranscriber():
             result = self.call_openai(
                 instructions=map_instructions,
                 input_message=context_note + "\n\n" + segment,
+                max_output_tokens=self._resolve_output_token_limit(),
             )
             partials.append(result.content.strip())
 
@@ -602,6 +700,7 @@ class JBGtranscriber():
                     self.call_openai(
                         instructions=reduce_instructions,
                         input_message=body,
+                        max_output_tokens=self._resolve_output_token_limit(),
                     ).content.strip()
                 )
             partials = merged
@@ -664,6 +763,122 @@ class JBGtranscriber():
 
         return best_budget
 
+    def _condense_whole_text(self, instructions, text, task_name, reduce_suffix=None):
+        """Run an instruction whose answer is much smaller than its input.
+
+        One call when the text fits, otherwise map over segments and merge the
+        partial answers into one.
+        """
+        if not (text or "").strip():
+            return ""
+
+        enc = self._get_encoder_for_segmentation()
+        budget = self._resolve_input_token_budget()
+        max_output = self._resolve_output_token_limit()
+        available = self._available_input_tokens(instructions, enc, budget)
+        segments = self._split_into_segments(text, enc, max_tokens=available)
+
+        if len(segments) == 1:
+            return (self.call_openai(
+                instructions=instructions,
+                input_message=text,
+                max_output_tokens=max_output,
+            ).content or "").strip()
+
+        logger.info(f"{task_name}: {len(segments)} segment, slås ihop efteråt.")
+        partials = []
+        for i, segment in enumerate(segments):
+            if i > 0:
+                time.sleep(SEGMENT_PAUSE_SECONDS)
+            logger.info(f" {task_name}: segment {i+1}/{len(segments)}...")
+            partials.append((self.call_openai(
+                instructions=instructions + "\n\n" + MAP_STAGE_SUFFIX,
+                input_message=f"(Detta är del {i+1} av {len(segments)}.)\n\n" + segment,
+                max_output_tokens=max_output,
+            ).content or "").strip())
+
+        body = "\n\n".join(
+            f"--- Underlag {i+1} av {len(partials)} ---\n{part}"
+            for i, part in enumerate(partials)
+        )
+        suffix = reduce_suffix if reduce_suffix else REDUCE_STAGE_SUFFIX
+        return (self.call_openai(
+            instructions=instructions + "\n\n" + suffix,
+            input_message=body,
+            max_output_tokens=max_output,
+        ).content or "").strip()
+
+    def _rewrite_whole_text(self, instructions, text, task_name):
+        """Run an instruction that must give the whole text back, in segments.
+
+        Used for work that transforms the transcription rather than condensing
+        it. Segments carry no overlap, since the outputs are concatenated and an
+        overlap would duplicate text.
+        """
+        enc = self._get_encoder_for_segmentation()
+        budget = self._rewrite_segment_budget(instructions, enc)
+        segments = self._split_into_segments(text, enc, max_tokens=budget, overlap_sentences=0)
+        max_output = self._resolve_output_token_limit()
+
+        logger.info(f"{task_name}: {len(segments)} segment (budget {budget} tokens).")
+
+        parts, truncated_segments = [], 0
+        for i, segment in enumerate(segments):
+            if i > 0:
+                time.sleep(SEGMENT_PAUSE_SECONDS)
+            logger.info(f" {task_name}: segment {i+1}/{len(segments)}...")
+            result = self.call_openai(
+                instructions=instructions,
+                input_message=segment,
+                max_output_tokens=max_output,
+            )
+            if self.last_answer_truncated:
+                truncated_segments += 1
+            parts.append((result.content or "").strip())
+
+        if truncated_segments:
+            logger.error(
+                f"{task_name}: {truncated_segments} av {len(segments)} segment kapades "
+                "av modellens svarslängd. Resultatet kan sakna text."
+            )
+
+        return "\n\n".join(part for part in parts if part)
+
+    def _resolve_output_token_limit(self):
+        """Resolve how many tokens the model may produce in one answer."""
+        override = os.getenv("JBG_MAX_OUTPUT_TOKENS")
+        if override:
+            try:
+                return max(512, int(override))
+            except ValueError:
+                logger.warning(f"Ignoring invalid JBG_MAX_OUTPUT_TOKENS value: {override!r}")
+
+        model = (self.openai_model or "").lower()
+        best, best_len = None, -1
+        for prefix, limit in MODEL_OUTPUT_TOKEN_LIMITS.items():
+            if model.startswith(prefix) and len(prefix) > best_len:
+                best, best_len = limit, len(prefix)
+        return best if best is not None else DEFAULT_MAX_OUTPUT_TOKENS
+
+    def _rewrite_segment_budget(self, instructions, enc):
+        """Input budget for work where the model must return the whole text.
+
+        Capped by the output limit rather than the context window, because the
+        answer has to fit in the reply.
+        """
+        input_budget = self._available_input_tokens(
+            instructions, enc, self._resolve_input_token_budget()
+        )
+        output_limit = self._resolve_output_token_limit()
+        capped = int(output_limit / REWRITE_OUTPUT_HEADROOM)
+        budget = max(MIN_MAX_INPUT_TOKENS, min(input_budget, capped))
+        if capped < input_budget:
+            logger.info(
+                f"Segmentbudget begränsad av modellens svarslängd: {budget} tokens "
+                f"(kontextfönstret hade tillåtit {input_budget})."
+            )
+        return budget
+
     def _available_input_tokens(self, instructions, enc, budget):
         """Tokens left for transcription content once instructions and answer are reserved."""
         instruction_tokens = len(self._tokenize(instructions, enc))
@@ -673,10 +888,10 @@ class JBGtranscriber():
     def find_suspicious_phrases(self):
         """Identifierar och markerar osannolika eller grammatiskt tveksamma ordkombinationer."""
         try:
-            prompt = JBGtranscriber.policy_text(
-                self.prompt_policy, "suspicious_phrases"
-            ) + "\n" + self.transcription
-            self.marked_text = self.call_openai_simple(prompt).content
+            instructions = JBGtranscriber.policy_text(self.prompt_policy, "suspicious_phrases")
+            self.marked_text = self._rewrite_whole_text(
+                instructions, self.transcription, "Markering av misstänkta fel"
+            )
         except Exception as e:
             logger.error(f"An error occurred while finding suspicious phrases: {e}")
             self.marked_text = "Markering av misstänkta fel i texten misslyckades"
@@ -684,10 +899,20 @@ class JBGtranscriber():
     def suggest_follow_up_questions(self):
         """Föreslår fem relevanta uppföljningsfrågor baserat på transkriberingen."""
         try:
-            prompt = JBGtranscriber.policy_text(
+            instructions = JBGtranscriber.policy_text(
                 self.prompt_policy, "follow_up_questions", "Generera uppföljningsfrågor:"
-            ) + "\n" + self.transcription
-            self.follow_up_questions = self.call_openai_simple(prompt).content
+            )
+            self.follow_up_questions = self._condense_whole_text(
+                instructions,
+                self.transcription,
+                "Förslag på uppföljningsfrågor",
+                reduce_suffix=(
+                    "Nedan följer frågeförslag från flera delar av samma intervju. "
+                    "Välj ut och formulera den slutliga uppsättningen frågor enligt "
+                    "instruktionerna ovan. Slå ihop frågor som överlappar och "
+                    "numrera dem. Nämn inte att materialet varit uppdelat."
+                ),
+            )
         except Exception as e:
             logger.error(f"An error occurred while generating follow-up questions: {e}")
             self.follow_up_questions = "Förslag till uppföljande frågor misslyckades"
@@ -708,7 +933,11 @@ class JBGtranscriber():
         """
         
         try:
-            self.analyze_speakers = self.call_openai(instructions=prompt, input_message=input_message).content
+            self.analyze_speakers = self.call_openai(
+                instructions=prompt,
+                input_message=input_message,
+                max_output_tokens=self._resolve_output_token_limit(),
+            ).content
         except Exception as e:
             logger.error(f"An error occurred while analyzing speakers: {e}")
             self.analyze_speakers = "Försöket till identifiering av talare misslyckades"
@@ -718,17 +947,18 @@ class JBGtranscriber():
         # Setup encoder for model
         enc = self._get_encoder_for_segmentation()
 
-        # The same model-aware budget is used here, so diarization is normally
-        # done in a single call as well. That keeps speaker numbering consistent
-        # across the whole interview.
+        # Diarization rewrites the transcription rather than condensing it: the
+        # model has to give every line back with a speaker label. The budget is
+        # therefore capped by how much the model can *answer*, not by how much
+        # it can read. Sized by the context window alone, a long interview would
+        # be sent in one piece and the reply cut off part way through, losing
+        # the rest of the text.
         prompt_text = JBGtranscriber.policy_text(
             self.prompt_policy,
             "speaker_diarization",
             "Försök att identifiera olika röster i följande transkribering:",
         )
-        available = self._available_input_tokens(
-            prompt_text, enc, self._resolve_input_token_budget()
-        )
+        available = self._rewrite_segment_budget(prompt_text, enc)
 
         # För talaranalys vill vi undvika överlappade segment för att slippa duplikationer
         segments = self._split_into_segments(
@@ -759,8 +989,14 @@ class JBGtranscriber():
                     context = f"\nDetta är del {i+1}. Fortsätt numrera talare konsekvent.\n"
                     diarized = self.call_openai(
                         instructions=prompt + context,
-                        input_message=segment
+                        input_message=segment,
+                        max_output_tokens=self._resolve_output_token_limit(),
                     ).content
+                    if self.last_answer_truncated:
+                        logger.error(
+                            f"Talaranalys: segment {i+1} kapades av modellens svarslängd. "
+                            "Delar av texten kan saknas."
+                        )
                     diarized_segments.append(diarized)
 
                 # Slå ihop och städa bort uppenbara upprepningar

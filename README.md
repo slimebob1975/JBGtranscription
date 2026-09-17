@@ -245,10 +245,26 @@ When a transcription genuinely does not fit, it is processed in two stages:
 Speaker identification uses the same budget, which keeps speaker numbering
 consistent across a whole interview.
 
+Two kinds of work are sent to the model, and they are budgeted differently.
+**Condensing** work (the summary, follow-up questions) produces an answer far
+smaller than its input, so it may use the full context window. **Rewriting**
+work (marking suspected errors, speaker identification) has to give the whole
+text back, so its segment size is capped by how much the model can *answer*.
+Sized by the context window alone, a long interview would be sent in one piece
+and the reply cut off part way through, losing the rest of the text.
+
+Every call carries an output limit. Models disagree about the parameter name,
+so `max_completion_tokens` is tried first and `max_tokens` second, with the
+working name remembered per model; if neither is accepted the call is made
+without a limit. An answer that stops because it hit the limit is logged as an
+error rather than passing silently.
+
+`JBG_MAX_OUTPUT_TOKENS` overrides the answer limit, and
 `JBG_MAX_INPUT_TOKENS` overrides the input token budget:
 
 ```env
 JBG_MAX_INPUT_TOKENS=60000
+JBG_MAX_OUTPUT_TOKENS=16000
 ```
 
 If it is unset, the budget is resolved from the selected model, falling back to a

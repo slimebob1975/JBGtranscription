@@ -1,14 +1,7 @@
 # Backlog - JBGTransciption
 
 ## Known issues
-- [ ] `find_suspicious_phrases` and `suggest_follow_up_questions` still send the
-      whole transcription in one call with no token budget check. Rarely a
-      problem at current budgets, but `find_suspicious_phrases` has to return the
-      full text, so segmenting it needs a design decision rather than a tweak.
-- [ ] No `max_completion_tokens` is set on OpenAI calls. A very long merge step
-      could be cut short by the model's default output limit. Note that newer
-      models reject `max_tokens` in favour of `max_completion_tokens`, so this
-      needs per-model handling.
+- [ ] `call_openai_simple` is no longer used by anything and could be removed.
 
 ## Planned improvments
 - [ ] Let the user edit the instructions for the other analyses too
@@ -23,6 +16,12 @@
       so the form height does not change when the instruction is shown.
 
 ## Solved
+- [x] Give every OpenAI call an output limit, negotiating `max_completion_tokens`
+      against `max_tokens` per model, and detect answers cut off by that limit
+- [x] Segment `find_suspicious_phrases` and `suggest_follow_up_questions`
+      instead of sending the whole transcription in one unbudgeted call
+- [x] Size text-rewriting work by how much the model can answer rather than by
+      the context window, so long interviews are not silently truncated
 - [x] Steer if encryption is optional from environmental variable
 - [x] Make the summary instruction editable in the GUI, with Enkel and Utförlig
       as starting points
