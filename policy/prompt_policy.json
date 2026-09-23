@@ -69,7 +69,7 @@
         },
         {
             "id": "linjar",
-            "label": "Linjär",
+            "label": "Kronologisk",
             "description": "Välj när samtalets förlopp är viktigt. Sammanfattningen följer transkriberingen från början till slut och behåller ordningsföljden.",
             "default": false,
             "prompt": [
