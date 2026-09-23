@@ -10,6 +10,7 @@ import shutil
 import uuid
 import re
 import src.JBGtranscriber as JBGtranscriber
+from src.JBGtranscriber import MAX_SUMMARY_PROMPT_CHARS, LEGACY_SUMMARY_OPTION_IDS
 from src.JBGSecureFileHandler import SecureFileHandler
 from pathlib import Path
 import torch
@@ -114,6 +115,7 @@ def transcribe_audio(
     openai_model: str,
     summarize: bool,
     summary_style: str,
+    summary_prompt: str,
     suspicious: bool,
     questions: bool,
     speakers: bool,
@@ -155,6 +157,7 @@ def transcribe_audio(
         transcriber.perform_transcription_steps(
             generate_summary=summarize,
             summary_style=summary_style,
+            summary_prompt=summary_prompt,
             find_suspicious_phrases=suspicious,
             suggest_follow_up_questions=questions,
             analyze_speakers=speakers,
@@ -207,6 +210,26 @@ def get_config():
     return {"title": title, "encryption_is_optional": encryption_is_optional}
 
 
+# Selectable, editable summary instructions for the GUI. Served from the prompt
+# policy so that the file stays the single source of truth.
+@app.get("/summary_prompts")
+def get_summary_prompts():
+    options = JBGtranscriber.JBGtranscriber.summary_options()
+    return {
+        "options": [
+            {
+                "id": o["id"],
+                "label": o["label"],
+                "description": o["description"],
+                "default": o["default"],
+                "prompt": o["prompt"],
+            }
+            for o in options
+        ],
+        "max_length": MAX_SUMMARY_PROMPT_CHARS,
+    }
+
+
 # To find and log the current user
 @app.get("/me")
 def get_user(request: Request):
@@ -225,7 +248,8 @@ async def upload_audio(
     api_key: str = Form(...),
     model: str = Form("gpt-4o"),
     summarize: bool = Form(False),
-    summary_style: str = Form("short"),
+    summary_style: str = Form(""),
+    summary_prompt: str = Form(""),
     suspicious: bool = Form(False),
     questions: bool = Form(False),
     speakers: bool = Form(False)
@@ -246,11 +270,34 @@ async def upload_audio(
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid encryption key.")
 
+    # The valid ids come from the prompt policy, so adding an option there is
+    # enough. Ids retired in an earlier version are still accepted and mapped.
+    summary_options = JBGtranscriber.JBGtranscriber.summary_options()
+    valid_style_ids = {o["id"] for o in summary_options}
+    if summary_style and summary_style not in valid_style_ids:
+        if summary_style in LEGACY_SUMMARY_OPTION_IDS:
+            summary_style = LEGACY_SUMMARY_OPTION_IDS[summary_style]
+        else:
+            raise HTTPException(status_code=400, detail="Invalid summary style.")
+
+    summary_prompt = (summary_prompt or "").strip()
+    if len(summary_prompt) > MAX_SUMMARY_PROMPT_CHARS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Summary instruction exceeds {MAX_SUMMARY_PROMPT_CHARS} characters.",
+        )
+    if not summarize:
+        summary_prompt = ""
+
+    # The instruction may contain case-specific context, so only its size is
+    # logged, never its content.
+    summary_prompt_source = "egen text" if summary_prompt else "standardtext"
+
     logger.info(f"""
           OpenAI API key was provided: {api_key != "sk-..."}\n
           OpenAI model of choice: {model}\n
           OpenAI API tasks: \n
-          \tSummary: {summarize} ({summary_style})\n
+          \tSummary: {summarize} ({summary_style}, {summary_prompt_source}, {len(summary_prompt)} tecken)\n
           \tMark suspicious: {suspicious} \n
           \tGenerate questions: {questions} \n 
           \tSpeaker detection: {speakers}
@@ -289,6 +336,7 @@ async def upload_audio(
         model,
         summarize,
         summary_style,
+        summary_prompt,
         suspicious,
         questions,
         speakers

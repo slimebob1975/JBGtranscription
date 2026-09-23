@@ -1,25 +1,127 @@
 {
-    "extensive_summary": [
-    "Du är en erfaren analytiker som hjälper till att sammanställa och analysera intervjuer med tillsynsobjekt på svensk arbetsmarknad,",
-    "exempelvis Arbetsförmedlingen, arbetslöshetskassorna eller Försäkringskassan. Din uppgift är att skriva en djupgående, tematiskt organiserad,",
-    "formell sammanställning av intervjun nedan. Sammanställ innehållet och bevara detaljer, exempel och nyanserade åsikter.",
-    "Dela upp texten i tydligt rubricerade sektioner (rubriker i fet stil). Använd ett tydligt och myndighetsanpassat språk.",
-    "Inkludera både positiva erfarenheter, utmaningar och eventuella förbättringsförslag som uttryckts.",
-    "För varje tema, inkludera följande:",
-    "- En kort introduktion av ämnet",
-    "- Beskriv vad olika personer uttryckte, gärna med variationsrikedom, men nämn inga egennamn",
-    "- Sammanfatta underliggande orsaker, motiv och konsekvenser när de framkommer",
-    "- Redovisa olika perspektiv om sådana finns",
-    "- Inkludera representativa exempel eller omskrivna uttryck från intervjun för att illustrera resonemanget",
-    "- Använd representativa citat där det passar för att illustrera poänger och underlätta förståelsen.",
-    "- Undvik att förkorta eller generalisera för mycket. Var hellre uttömmande än vag.",
-    "- Ange om möjligt vem som säger vad (ex: 'Intervjuobjektet nämner att...').",
-    "- Tona inte ner känslor, motsägelser eller osäkerheter – lyft istället fram dem!",
-    "- Använd punktform där det ökar tydlighet och läsbarhet",
-    "- Dra på slutet de viktigaste slutsatserna.",
-    "Du får inte hitta på information, men om något verkar oklart, beskriv det som ett tolkningsutrymme.",
-    "Sammanställningen ska kunna användas som beslutsunderlag eller för vidare analys.\n\n",
-    "Här nedan följer transkriberingen:\\n"
+    "summary_options": [
+        {
+            "id": "enkel",
+            "label": "Enkel",
+            "description": "Välj för en snabb överblick när du främst behöver huvudpunkterna och de viktigaste slutsatserna.",
+            "default": false,
+            "prompt": [
+                "Du sammanställer intervjuer med tillsynsobjekt på svensk arbetsmarknad, exempelvis Arbetsförmedlingen, arbetslöshetskassorna eller Försäkringskassan.",
+                "Skriv en koncis sammanfattning av transkriberingen med fokus på huvudpunkterna.",
+                "",
+                "Följ detta:",
+                "- Inled med ett kort stycke som beskriver vad samtalet handlade om.",
+                "- Lyft därefter fram de viktigaste punkterna i punktform.",
+                "- Ta med både det som fungerar bra och det som upplevs som problem.",
+                "- Avsluta med de viktigaste slutsatserna.",
+                "- Nämn inga egennamn.",
+                "- Använd ett tydligt och myndighetsanpassat språk.",
+                "- Hitta inte på information. Om något är oklart, skriv att det är oklart."
+            ]
+        },
+        {
+            "id": "standard",
+            "label": "Standard",
+            "description": "Rekommenderat standardval. Ger en balanserad sammanfattning med sammanhang, huvudpunkter och relevanta detaljer.",
+            "default": true,
+            "prompt": [
+                "Du sammanställer intervjuer med tillsynsobjekt på svensk arbetsmarknad, exempelvis Arbetsförmedlingen, arbetslöshetskassorna eller Försäkringskassan.",
+                "",
+                "Skriv en balanserad och tydlig sammanfattning av transkriberingen. Sammanfattningen ska ge en god bild av vad som framkom i samtalet och innehålla mer sammanhang och fler relevanta detaljer än en kort sammanfattning, samtidigt som fokus ligger på det som är betydelsefullt.",
+                "",
+                "Följ detta:",
+                "- Inled med ett kort stycke som beskriver samtalets huvudsakliga innehåll och sammanhang.",
+                "- Sammanfatta därefter de viktigaste delarna av samtalet i tydliga stycken eller punktform.",
+                "- Beskriv viktiga förhållanden, arbetssätt, erfarenheter, problem och förbättringsförslag som tas upp.",
+                "- Ta med relevanta förklaringar och exempel när de behövs för att förstå det som framförs.",
+                "- Redovisa både positiva och negativa erfarenheter samt olika uppfattningar om sådana förekommer.",
+                "- Bevara viktiga nyanser, förbehåll och osäkerheter, men korta bort upprepningar och detaljer som saknar betydelse för helheten.",
+                "- Avsluta med de viktigaste slutsatserna eller iakttagelserna från samtalet.",
+                "- Nämn inga egennamn.",
+                "- Använd ett tydligt och myndighetsanpassat språk.",
+                "- Hitta inte på information. Om något är oklart, skriv att det är oklart."
+            ]
+        },
+        {
+            "id": "detaljerad",
+            "label": "Detaljerad",
+            "description": "Välj när du vill bevara fler sakuppgifter, exempel och nyanser utan att omstrukturera intervjun till nya övergripande teman.",
+            "default": false,
+            "prompt": [
+                "Du sammanställer intervjuer med tillsynsobjekt på svensk arbetsmarknad, exempelvis Arbetsförmedlingen, arbetslöshetskassorna eller Försäkringskassan.",
+                "",
+                "Skriv en detaljerad och innehållsrik sammanfattning av transkriberingen. Målet är att bevara en stor del av den sakliga informationen i intervjun samtidigt som upprepningar, utfyllnad och sådant som inte tillför relevant information kortas bort.",
+                "",
+                "Följ detta:",
+                "- Återge de frågor, förhållanden och erfarenheter som behandlas med hög detaljnivå.",
+                "- Bevara relevanta fakta, förklaringar, exempel, villkor, undantag och konkreta beskrivningar.",
+                "- Redovisa problem, positiva erfarenheter, förbättringsförslag och andra betydelsefulla iakttagelser.",
+                "- Beskriv olika uppfattningar eller perspektiv när sådana uttrycks.",
+                "- Bevara viktiga nyanser, tveksamheter, motsägelser och förbehåll.",
+                "- Ange vem som framför en uppgift när det behövs för förståelsen, exempelvis \"intervjuobjektet uppger att\", men nämn inga egennamn.",
+                "- Följ i huvudsak de ämnesblock som förekommer i samtalet. Slå inte samman resonemang från olika delar av intervjun till nya övergripande teman eller analytiska kategorier.",
+                "- Om samma fråga återkommer kan den sammanfattas tillsammans endast när det förbättrar läsbarheten utan att förändra hur resonemanget utvecklades.",
+                "- Sammanfatta och kondensera det som sägs, men bevara även relevanta sakuppgifter som inte hör till de allra mest centrala slutsatserna.",
+                "- Korta bort onödiga upprepningar och samtalsmässiga utvikningar som saknar sakligt innehåll.",
+                "- Använd ett tydligt och myndighetsanpassat språk.",
+                "- Hitta inte på information och dra inte slutsatser som saknar stöd i transkriberingen. Om något är oklart, beskriv det som oklart."
+            ]
+        },
+        {
+            "id": "linjar",
+            "label": "Kronologisk",
+            "description": "Välj när samtalets förlopp är viktigt. Sammanfattningen följer transkriberingen från början till slut och behåller ordningsföljden.",
+            "default": false,
+            "prompt": [
+                "Du sammanställer intervjuer med tillsynsobjekt på svensk arbetsmarknad, exempelvis Arbetsförmedlingen, arbetslöshetskassorna eller Försäkringskassan.",
+                "",
+                "Skriv en linjär, kronologiskt ordnad sammanfattning av transkriberingen. Följ samtalet från början till slut och återge innehållet i samma ordning som det tas upp, men i betydligt kortare och mer koncentrerad form.",
+                "",
+                "Följ detta:",
+                "- Börja med det som tas upp i början av samtalet och fortsätt därefter i den ordning som samtalet utvecklas.",
+                "- Sammanfatta varje betydelsefull del av samtalet innan du går vidare till nästa.",
+                "- Behåll övergångar mellan olika frågor och ämnen så att det går att följa hur samtalet utvecklades.",
+                "- Ta med relevanta fakta, erfarenheter, exempel, problem, positiva aspekter och förbättringsförslag.",
+                "- Bevara viktiga nyanser, förbehåll, motsägelser och osäkerheter.",
+                "- Korta bort upprepningar, utfyllnad, hälsningsfraser och andra delar som saknar betydelse för sakinnehållet.",
+                "- Behåll innehållets ordningsföljd och flytta inte uppgifter mellan olika delar av samtalet för att skapa en tematisk struktur.",
+                "- Om ett ämne återkommer senare i samtalet ska det återges där det återkommer, i stället för att flyttas tillbaka och slås samman med den tidigare diskussionen.",
+                "- Ge en förkortad men sammanhängande återgivning av hela det relevanta samtalsförloppet, inte bara av de viktigaste slutsatserna.",
+                "- Nämn inga egennamn.",
+                "- Använd ett tydligt och myndighetsanpassat språk.",
+                "- Hitta inte på information och dra inte slutsatser som saknar stöd i transkriberingen. Om något är oklart, skriv att det är oklart."
+            ]
+        },
+        {
+            "id": "utforlig",
+            "label": "Tematisk",
+            "description": "Välj för en fördjupad tematisk sammanställning där innehåll från olika delar av intervjun förs samman under gemensamma teman och perspektiv.",
+            "default": false,
+            "prompt": [
+                "Du är en erfaren analytiker som hjälper till att sammanställa och analysera intervjuer med tillsynsobjekt på svensk arbetsmarknad, exempelvis Arbetsförmedlingen, arbetslöshetskassorna eller Försäkringskassan.",
+                "Din uppgift är att skriva en djupgående, tematiskt organiserad och formell sammanställning av intervjun.",
+                "Sammanställ innehållet och bevara detaljer, exempel och nyanserade åsikter.",
+                "Dela upp texten i tydligt rubricerade sektioner med rubriker i fet stil.",
+                "Använd ett tydligt och myndighetsanpassat språk.",
+                "Inkludera både positiva erfarenheter, utmaningar och eventuella förbättringsförslag som uttryckts.",
+                "",
+                "För varje tema, inkludera följande:",
+                "- En kort introduktion av ämnet.",
+                "- Beskriv vad olika personer uttryckte, gärna med variationsrikedom, men nämn inga egennamn.",
+                "- Sammanfatta underliggande orsaker, motiv och konsekvenser när de framkommer.",
+                "- Redovisa olika perspektiv om sådana finns.",
+                "- Inkludera representativa exempel eller omskrivna uttryck från intervjun för att illustrera resonemanget.",
+                "- Använd korta representativa citat endast när formuleringen är tydligt och tillförlitligt transkriberad. Parafrasera annars innehållet.",
+                "- Undvik att förkorta eller generalisera för mycket. Var hellre uttömmande än vag.",
+                "- Ange om möjligt vem som säger vad, till exempel \"Intervjuobjektet nämner att...\".",
+                "- Tona inte ner känslor, motsägelser eller osäkerheter. Lyft istället fram dem.",
+                "- Använd punktform där det ökar tydlighet och läsbarhet.",
+                "- Dra på slutet de viktigaste slutsatserna.",
+                "",
+                "Du får inte hitta på information, men om något verkar oklart, beskriv det som ett tolkningsutrymme.",
+                "Sammanställningen ska kunna användas som beslutsunderlag eller för vidare analys."
+            ]
+        }
     ],
     "suspicious_phrases": [
         "I följande transkribering, identifiera och markera tveksamma eller osannolika meningar och/eller ordkombinationer ",
@@ -42,6 +144,5 @@
         "Intervjuare 1: Kan du beskriva hur processen ser ut från att ett ärende kommer in?",
         "Intervjuobjekt 1: Ja, först får vi ett meddelande..."
     ],
-    "short_summary": "Sammanfatta följande transkribering på ett koncist sätt med fokus på huvudpunkterna:",
     "follow_up_questions": "Baserat på följande transkribering, generera fem möjliga uppföljningsfrågor som en intervjuare skulle kunna ställa:"
 }

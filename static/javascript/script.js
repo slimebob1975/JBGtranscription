@@ -1,6 +1,318 @@
 // ✅ On page load: enable/disable fields based on API key presence
 let globalEncryptionKeyBase64 = "";
 
+// --- Editable summary instruction -------------------------------------------
+// The two default texts ("Enkel" and "Utförlig") are fetched from the backend so
+// that policy/prompt_policy.json stays the single source of truth. The user may
+// edit the text freely; an edited text is remembered between visits.
+
+const SUMMARY_PROMPT_STORAGE_KEY = "jbg_summary_prompt";
+const SUMMARY_STYLE_STORAGE_KEY = "jbg_summary_style";
+
+// Option ids retired in an earlier version. Browsers still hold these, so a
+// stored value is mapped rather than silently falling back to the default.
+const LEGACY_SUMMARY_STYLE_IDS = { short: "enkel", extensive: "utforlig" };
+
+let summaryOptions = [];              // [{id, label, description, default, prompt}]
+let summaryPromptMaxLength = 20000;
+let summaryOptionsLoaded = false;
+
+function currentSummaryStyle() {
+    return document.getElementById("summaryStyle").value || "";
+}
+
+function summaryOptionById(id) {
+    return summaryOptions.find(o => o.id === id) || null;
+}
+
+function defaultSummaryPromptFor(id) {
+    const option = summaryOptionById(id);
+    return option ? option.prompt : "";
+}
+
+function summaryStyleLabel(id) {
+    const option = summaryOptionById(id);
+    return option ? option.label : id;
+}
+
+function isSummaryPromptEdited() {
+    const textarea = document.getElementById("summaryPrompt");
+    return textarea.value.trim() !== defaultSummaryPromptFor(currentSummaryStyle()).trim();
+}
+
+function matchesAnySummaryDefault(text) {
+    const trimmed = (text || "").trim();
+    return summaryOptions.some(o => o.prompt.trim() === trimmed);
+}
+
+function refreshSummaryStyleDescription() {
+    // The description is carried by the tooltip on the select and on each
+    // option; there is no separate visible line.
+    const option = summaryOptionById(currentSummaryStyle());
+    const select = document.getElementById("summaryStyle");
+    const description = option ? option.description : "";
+    if (description) {
+        select.title = description;
+    } else {
+        select.removeAttribute("title");
+    }
+}
+
+function refreshSummaryPromptState() {
+    const state = document.getElementById("summaryPromptState");
+    const resetButton = document.getElementById("resetSummaryPrompt");
+
+    if (!summaryOptionsLoaded) {
+        state.textContent = "Standardtexterna kunde inte hämtas. Skriv en egen instruktion, annars används serverns standardtext.";
+        state.hidden = false;
+        resetButton.hidden = true;
+        return;
+    }
+
+    // Nothing is shown while a default text is in place - that is the normal
+    // case and needs no label. An edited instruction is still called out,
+    // since it is the state the user could otherwise forget they are in.
+    if (isSummaryPromptEdited()) {
+        state.textContent = "Egen text används.";
+        state.hidden = false;
+        resetButton.hidden = false;
+    } else {
+        state.textContent = "";
+        state.hidden = true;
+        resetButton.hidden = true;
+    }
+    const subtitle = document.getElementById("summaryEditorSubtitle");
+    if (subtitle) {
+        subtitle.textContent = `Utgår från: ${summaryStyleLabel(currentSummaryStyle())}`;
+    }
+}
+
+function applySummaryDefault(id) {
+    document.getElementById("summaryPrompt").value = defaultSummaryPromptFor(id);
+    storeSummaryPrompt();
+    refreshSummaryStyleDescription();
+    refreshSummaryPromptState();
+}
+
+function storeSummaryPrompt() {
+    try {
+        localStorage.setItem(SUMMARY_PROMPT_STORAGE_KEY, document.getElementById("summaryPrompt").value);
+        localStorage.setItem(SUMMARY_STYLE_STORAGE_KEY, currentSummaryStyle());
+    } catch (err) {
+        console.warn("Kunde inte spara sammanfattningsinstruktionen lokalt:", err);
+    }
+}
+
+function populateSummaryStyleSelect() {
+    const select = document.getElementById("summaryStyle");
+    select.innerHTML = "";
+    summaryOptions.forEach(option => {
+        const el = document.createElement("option");
+        el.value = option.id;
+        el.textContent = option.label;
+        if (option.description) el.title = option.description;
+        if (option.default) el.selected = true;
+        select.appendChild(el);
+    });
+}
+
+// --- Floating editor ---------------------------------------------------------
+// The instruction is edited in a <dialog> so that showing it never changes the
+// height of the page. Native showModal() is used for the focus trap, the
+// backdrop and Esc; only its default centring is overridden, because that
+// centres on the iframe's own viewport rather than what the user can see.
+
+let summaryPromptSnapshot = null;   // text as it was when the editor opened
+let latestParentPageInfo = null;    // from iframe-resizer, when embedded
+
+function trackParentPageInfo() {
+    // getPageInfo reports the parent's scroll position and viewport, so the
+    // editor can open where the user is actually looking. Absent or silent
+    // when not embedded, in which case the trigger anchor is used alone.
+    try {
+        if (window.parentIFrame && typeof window.parentIFrame.getPageInfo === "function") {
+            window.parentIFrame.getPageInfo(info => { latestParentPageInfo = info; });
+        }
+    } catch (err) {
+        console.warn("Kunde inte läsa förälderns sidinformation:", err);
+    }
+}
+
+function positionSummaryEditor(trigger) {
+    // Called after the dialog is shown, so its real height can be measured.
+    const dialog = document.getElementById("summaryEditor");
+    const dialogHeight = dialog.offsetHeight || 460;
+    const info = latestParentPageInfo;
+
+    // Fallback: anchor above the link the user just clicked. It is on screen by
+    // definition, so this is safe when nothing else is known.
+    let top = trigger.getBoundingClientRect().top + window.scrollY - 120;
+
+    if (info && typeof info.scrollTop === "number" && typeof info.offsetTop === "number") {
+        // Embedded, and the parent has reported its scroll position: centre on
+        // the part of the iframe the user can actually see.
+        const visibleTop = info.scrollTop - info.offsetTop;
+        const visibleHeight = info.clientHeight || info.windowHeight || 0;
+        if (visibleHeight > 0) {
+            top = visibleTop + (visibleHeight - dialogHeight) / 2;
+        }
+    } else if (!window.parentIFrame) {
+        // Standalone: innerHeight is the real window, so centre on it.
+        top = window.scrollY + (window.innerHeight - dialogHeight) / 2;
+    }
+
+    dialog.style.top = `${Math.round(Math.max(8, top))}px`;
+}
+
+function openSummaryEditor() {
+    const dialog = document.getElementById("summaryEditor");
+    const textarea = document.getElementById("summaryPrompt");
+    const trigger = document.getElementById("openSummaryEditor");
+
+    summaryPromptSnapshot = textarea.value;
+
+    if (typeof dialog.showModal === "function") {
+        dialog.showModal();
+    } else {
+        dialog.setAttribute("open", "");   // very old browsers: no modality
+    }
+    positionSummaryEditor(trigger);
+    textarea.focus();
+    textarea.setSelectionRange(0, 0);
+    textarea.scrollTop = 0;
+}
+
+function closeSummaryEditor(apply) {
+    const dialog = document.getElementById("summaryEditor");
+    const textarea = document.getElementById("summaryPrompt");
+
+    if (!apply && summaryPromptSnapshot !== null) {
+        textarea.value = summaryPromptSnapshot;   // Avbryt and Esc revert
+    }
+    summaryPromptSnapshot = null;
+
+    storeSummaryPrompt();
+    refreshSummaryPromptState();
+
+    if (dialog.open && typeof dialog.close === "function") {
+        dialog.close();
+    } else {
+        dialog.removeAttribute("open");
+    }
+}
+
+function setUpSummaryEditorDialog() {
+    const dialog = document.getElementById("summaryEditor");
+
+    document.getElementById("openSummaryEditor")
+        .addEventListener("click", openSummaryEditor);
+    document.getElementById("applySummaryEditor")
+        .addEventListener("click", () => closeSummaryEditor(true));
+    document.getElementById("cancelSummaryEditor")
+        .addEventListener("click", () => closeSummaryEditor(false));
+
+    // Esc means the same here as everywhere else: discard and close.
+    dialog.addEventListener("cancel", event => {
+        event.preventDefault();
+        closeSummaryEditor(false);
+    });
+
+    // Clicking the backdrop is treated as Avbryt.
+    dialog.addEventListener("click", event => {
+        if (event.target === dialog) closeSummaryEditor(false);
+    });
+
+    trackParentPageInfo();
+}
+
+function setUpSummaryPromptEditor() {
+    const textarea = document.getElementById("summaryPrompt");
+    const resetButton = document.getElementById("resetSummaryPrompt");
+    const select = document.getElementById("summaryStyle");
+
+    textarea.addEventListener("input", () => {
+        if (textarea.value.length > summaryPromptMaxLength) {
+            textarea.value = textarea.value.slice(0, summaryPromptMaxLength);
+        }
+        storeSummaryPrompt();
+        refreshSummaryPromptState();
+    });
+
+    resetButton.addEventListener("click", () => {
+        applySummaryDefault(currentSummaryStyle());
+        textarea.focus();
+    });
+
+    setUpSummaryEditorDialog();
+
+    // Remembered so the selection can be restored if the user cancels.
+    let previousStyle = null;
+
+    select.addEventListener("focus", () => { previousStyle = select.value; });
+
+    select.addEventListener("change", () => {
+        const newStyle = select.value;
+        const edited = !matchesAnySummaryDefault(textarea.value) && textarea.value.trim() !== "";
+
+        if (edited) {
+            const proceed = confirm(
+                `Din egen text ersätts av standardtexten för ${summaryStyleLabel(newStyle)}. Vill du fortsätta?`
+            );
+            if (!proceed) {
+                if (previousStyle !== null) select.value = previousStyle;
+                refreshSummaryStyleDescription();
+                refreshSummaryPromptState();
+                return;
+            }
+        }
+
+        previousStyle = newStyle;
+        applySummaryDefault(newStyle);
+    });
+
+    fetch("/summary_prompts")
+        .then(res => res.json())
+        .then(data => {
+            summaryOptions = Array.isArray(data.options) ? data.options : [];
+            summaryPromptMaxLength = data.max_length || summaryPromptMaxLength;
+            summaryOptionsLoaded = summaryOptions.length > 0;
+
+            if (!summaryOptionsLoaded) {
+                refreshSummaryPromptState();
+                return;
+            }
+
+            populateSummaryStyleSelect();
+
+            let savedStyle = localStorage.getItem(SUMMARY_STYLE_STORAGE_KEY);
+            if (savedStyle && LEGACY_SUMMARY_STYLE_IDS[savedStyle]) {
+                savedStyle = LEGACY_SUMMARY_STYLE_IDS[savedStyle];
+            }
+            if (savedStyle && summaryOptionById(savedStyle)) {
+                select.value = savedStyle;
+            }
+            previousStyle = select.value;
+
+            // A stored text that matches one of the defaults is not a custom
+            // instruction; it is just the default the user last looked at.
+            const savedPrompt = localStorage.getItem(SUMMARY_PROMPT_STORAGE_KEY);
+            const hasCustomText =
+                savedPrompt !== null &&
+                savedPrompt.trim() !== "" &&
+                !matchesAnySummaryDefault(savedPrompt);
+
+            textarea.value = hasCustomText ? savedPrompt : defaultSummaryPromptFor(select.value);
+
+            refreshSummaryStyleDescription();
+            refreshSummaryPromptState();
+        })
+        .catch(err => {
+            console.warn("Kunde inte hämta standardtexter för sammanfattning:", err);
+            summaryOptionsLoaded = false;
+            refreshSummaryPromptState();
+        });
+}
+
 fetch("/config")
   .then(res => res.json())
   .then(data => {
@@ -34,15 +346,18 @@ document.addEventListener("DOMContentLoaded", () => {
         checkboxes.forEach(cb => cb.disabled = !hasKey);
     });
 
-    // Summary checkbox: toggle radio buttons for style
+    // Summary checkbox: reveal the style choice and the editable instruction
     const summaryCheckbox = document.getElementById("optSummary");
     const summaryOptions = document.getElementById("summaryOptions");
 
     summaryCheckbox.addEventListener("change", () => {
         const show = summaryCheckbox.checked;
-        summaryOptions.style.display = show ? "block" : "none";
-        document.querySelectorAll('input[name="summaryStyle"]').forEach(rb => rb.disabled = !show);
+        summaryOptions.hidden = !show;
+        document.getElementById("summaryStyle").disabled = !show;
+        document.getElementById("openSummaryEditor").disabled = !show;
     });
+
+    setUpSummaryPromptEditor();
 
     // Show currently logged-in Azure AD user (if available)
     fetch("/me")
@@ -82,6 +397,8 @@ async function uploadFile() {
     document.getElementById("apiKey").disabled = true;
     document.getElementById("modelSelect").disabled = true;
     document.getElementById("optSummary").disabled = true;
+    document.getElementById("openSummaryEditor").disabled = true;
+    document.getElementById("summaryStyle").disabled = true;
     document.getElementById("optSuspicious").disabled = true;
     document.getElementById("optQuestions").disabled = true;
     document.getElementById("optSpeakers").disabled = true;
@@ -128,8 +445,14 @@ async function uploadFile() {
 
     formData.append("api_key", document.getElementById("apiKey").value.trim());
     formData.append("model", document.getElementById("modelSelect").value);
-    formData.append("summarize", document.getElementById("optSummary").checked);
-    formData.append("summary_style", document.querySelector('input[name="summaryStyle"]:checked')?.value || "short");
+    const summarizeChecked = document.getElementById("optSummary").checked;
+    formData.append("summarize", summarizeChecked);
+    formData.append("summary_style", currentSummaryStyle());
+    // Empty means "use the server-side default for the chosen style".
+    formData.append(
+        "summary_prompt",
+        summarizeChecked ? document.getElementById("summaryPrompt").value.trim() : ""
+    );
     formData.append("suspicious", document.getElementById("optSuspicious").checked);
     formData.append("questions", document.getElementById("optQuestions").checked);
     formData.append("speakers", document.getElementById("optSpeakers").checked);

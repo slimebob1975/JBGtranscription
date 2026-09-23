@@ -10,7 +10,7 @@ The completed transcription and selected analyses are assembled as a **Microsoft
 
 - 🎙️ Upload `.mp3` audio files for transcription
 - 🧠 Optional OpenAI-powered analysis:
-  - Generate a short or extensive **summary**
+  - Generate a **summary** from an editable instruction, chosen from a configurable set of summary types
   - Flag **suspected transcription errors**
   - Suggest **follow-up questions**
   - Attempt **speaker identification** (beta)
@@ -179,6 +179,99 @@ The web interface can encrypt the uploaded audio and the generated DOCX result w
 8. The server decrypts the result **in memory** and streams a normal `.docx` response to the browser.
 9. After the response has finished streaming, the server deletes the stored result file.
 10. The temporary uploaded audio file is also deleted after processing.
+
+### Editable summary instruction
+
+When **Generera sammanfattning** is ticked, the GUI reveals a dropdown of summary
+types and the instruction that will be sent to the language model together with
+the transcription. Selecting a type loads its default text, which may then be
+edited freely before uploading.
+
+- The options are served by `GET /summary_prompts` and read from the
+  `summary_options` list in `policy/prompt_policy.json`, so that file remains the
+  single source of truth. Adding an option there is all that is needed: no code
+  change, and the server validates the posted id against the same list.
+- Each option carries a `description`, shown both under the dropdown and as a
+  hover tooltip.
+- Exactly one option should have `"default": true`. It is preselected, and is
+  used when a request arrives with no style or an unrecognised one.
+- Option ids retired in an earlier version (`short`, `extensive`) are still
+  accepted by the API and migrated in the browser, so a returning user keeps
+  their selection.
+- An edited instruction is remembered in the browser's `localStorage` and
+  restored on the next visit. **Återgå till standardtexten** discards it.
+- The edited text is sent as the `summary_prompt` form field on upload. An empty
+  field means "use the server-side default for the selected style", so the field
+  is optional and older clients keep working.
+- The instruction is capped at 20 000 characters. Because it may contain
+  case-specific context, only its length is written to the log, never its
+  content.
+
+The selected type only decides which default text is loaded; every option runs
+through the same summarisation pipeline described below.
+
+#### Adding or changing an option
+
+Edit the `summary_options` list in `policy/prompt_policy.json`. Each entry needs:
+
+| Field | Meaning |
+| --- | --- |
+| `id` | Stable technical key, lowercase `a-z0-9_`. Never change an existing one: it is what the browser has stored. |
+| `label` | Shown in the dropdown. |
+| `description` | Tooltip and help text under the dropdown. |
+| `default` | `true` on exactly one option. |
+| `prompt` | The instruction, as a list of lines. |
+
+The order of the list is the order of the dropdown.
+
+### How long transcriptions are handled
+
+A summary is best when the model sees the whole transcription at once, so the
+service sends it in a single call whenever it fits inside the model's input
+budget. With current context windows that covers most recordings, including
+interviews well over an hour.
+
+When a transcription genuinely does not fit, it is processed in two stages:
+
+1. **Per segment.** The transcription is split between sentences, never at an
+   arbitrary token offset, with a small sentence overlap so that a thought
+   spanning a boundary is not lost. Each segment is processed with the same
+   instruction.
+2. **Merge.** The partial results are woven into one coherent text rather than
+   concatenated, so recurring themes are merged instead of repeated and the
+   result does not refer to "del 1", "del 2" and so on. If the partial results
+   are themselves too large, the merge is repeated until one text remains.
+
+Speaker identification uses the same budget, which keeps speaker numbering
+consistent across a whole interview.
+
+Two kinds of work are sent to the model, and they are budgeted differently.
+**Condensing** work (the summary, follow-up questions) produces an answer far
+smaller than its input, so it may use the full context window. **Rewriting**
+work (marking suspected errors, speaker identification) has to give the whole
+text back, so its segment size is capped by how much the model can *answer*.
+Sized by the context window alone, a long interview would be sent in one piece
+and the reply cut off part way through, losing the rest of the text.
+
+Every call carries an output limit. Models disagree about the parameter name,
+so `max_completion_tokens` is tried first and `max_tokens` second, with the
+working name remembered per model; if neither is accepted the call is made
+without a limit. An answer that stops because it hit the limit is logged as an
+error rather than passing silently.
+
+`JBG_MAX_OUTPUT_TOKENS` overrides the answer limit, and
+`JBG_MAX_INPUT_TOKENS` overrides the input token budget:
+
+```env
+JBG_MAX_INPUT_TOKENS=60000
+JBG_MAX_OUTPUT_TOKENS=16000
+```
+
+If it is unset, the budget is resolved from the selected model, falling back to a
+conservative default for models that are not listed in
+`MODEL_INPUT_TOKEN_BUDGETS`. If the API reports that the context window was
+exceeded, the budget is halved and the request retried, so a newly released model
+degrades to smaller segments instead of failing outright.
 
 ### Enforcing encryption
 
