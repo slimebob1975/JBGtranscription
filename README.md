@@ -180,6 +180,120 @@ The web interface can encrypt the uploaded audio and the generated DOCX result w
 9. After the response has finished streaming, the server deletes the stored result file.
 10. The temporary uploaded audio file is also deleted after processing.
 
+### What the result document contains
+
+In order: the transcribed text in the chosen form, then the analyses that were
+asked for, then two closing sections. **Om transkriberingen** names the Whisper
+model that actually ran, and **Statistik** is a table of what the run cost:
+
+| Moment | Modell | Anrop | Tokens in | Tokens ut | Tid |
+| --- | --- | --- | --- | --- | --- |
+
+One row per moment, plus a total. Only counts and timings are recorded, never
+any part of the text. The section is left out when no model ran.
+
+### Logging
+
+Logging is configured once per process. A log file is created under `log/` when
+the first logger is built, and every later logger writes to that same file.
+
+The transcription itself is never logged; its size in words is noted instead.
+Third-party request logging is kept at WARNING. The OpenAI client logs whole
+request bodies at DEBUG, which would put the entire transcription into the log
+file in clear text - plainly at odds with encrypting the result at rest. Set
+`JBG_LOG_HTTP=1` to allow it back while debugging the API itself; the log then
+says so on the first line.
+
+### Transcription accuracy
+
+The Whisper model used to be the largest that fits in the available RAM. The
+**Välj noggrannhet:** dropdown now sets a ceiling on that:
+
+| Option | Model |
+| --- | --- |
+| mycket hög | `KBLab/kb-whisper-large` |
+| hög | `KBLab/kb-whisper-medium` |
+| medel | `KBLab/kb-whisper-small` (default) |
+| bas | `KBLab/kb-whisper-base` |
+| liten | `KBLab/kb-whisper-tiny` |
+
+The chosen model is used exactly, or the first one below it in the list that
+fits the available RAM. The choice only decides where the search starts, so it
+is never upgraded past what was asked for: choosing `liten` deliberately for a
+quick run gives `liten`, however much memory the machine has.
+
+Because that fallback is otherwise invisible, the document records which model
+actually ran under the heading **Om transkriberingen**, and says so explicitly
+when a smaller model had to be used.
+
+The upload posts this as `transcription_accuracy`. An empty value means the
+default; an unknown one is rejected.
+
+### How the transcribed text is presented
+
+The result document contains exactly one form of the transcribed text, chosen
+with the radio group **Ange hur du vill ha den transkriberade texten**:
+
+| Option | Form | Needs an API key |
+| --- | --- | --- |
+| Rå text | The transcription as it is | No |
+| Med tidsstämplar | Segments prefixed with their timestamps | No |
+| Med markerade misstänkt fel | Suspected mistranscriptions marked between `[FEL?]` and `[/FEL?]` | Yes |
+
+The upload posts this as `transcription_format`, with the values `raw`,
+`timestamps` and `marked`. The retired `suspicious` form field is still
+accepted: `suspicious=true` is read as `marked`, so an older client keeps
+working.
+
+If the chosen form turns out to be unavailable - marking failed, or the model
+returned no timestamps - the document falls back to the raw text and says so,
+rather than leaving an error message where the transcription should be.
+
+### Completeness of rewritten text
+
+Marking suspected errors and identifying speakers both ask the model to give
+the whole transcription back, changed. Nothing in the API enforces that: the
+model may answer with only the passages it marked, which would quietly replace
+the transcription in the document with an excerpt of it.
+
+The result is therefore compared with its input by word count. A rewrite
+normally comes back slightly longer, since labels and markers add words. Below
+90% it is reported in the log; below 70% it is not used at all, and the
+document falls back to the raw text with a line saying why.
+
+### Speaker identification
+
+A long recording is labelled segment by segment, which raises a problem the
+model cannot solve on its own: each segment is processed in a separate call, so
+"Intervjuobjekt 1" in one segment need not be the same person as in the next.
+
+Each answer therefore ends with a speaker register - one line per label with a
+short factual note on how to recognise that person. The register is parsed off
+before the dialogue is kept, merged with what is already known, and given to
+the next segment, which is told to reuse those labels and introduce a new one
+only for a voice that is not in the list. The last few sentences of the
+previous segment are passed as context as well, marked as already handled, so
+a reply split across a boundary is attributed correctly without appearing
+twice.
+
+The dialogue itself contains nothing but replies: the instruction says so
+explicitly, since a description of each speaker repeated after every segment is
+not what the section is for. The speakers are instead listed once, under
+**Identifierade talare:** at the end of the section.
+
+The heading the model writes is matched loosely - with or without hashes,
+bold, colon or a different case - because a block that went unrecognised would
+otherwise be left sitting in the middle of the dialogue. If several blocks turn
+up in one answer, all of them are removed and the last is used.
+
+The raw register is never part of the result document. It is available afterwards
+as `speaker_register` on the transcriber, which is what a per-speaker analysis
+will be built on.
+
+If the model ignores the instruction and returns no register, the labels are
+recovered from the dialogue itself, so identification degrades rather than
+fails.
+
 ### Editable summary instruction
 
 When **Generera sammanfattning** is ticked, the GUI reveals a dropdown of summary

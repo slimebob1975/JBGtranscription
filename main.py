@@ -10,7 +10,14 @@ import shutil
 import uuid
 import re
 import src.JBGtranscriber as JBGtranscriber
-from src.JBGtranscriber import MAX_SUMMARY_PROMPT_CHARS, LEGACY_SUMMARY_OPTION_IDS
+from src.JBGtranscriber import (
+    MAX_SUMMARY_PROMPT_CHARS,
+    LEGACY_SUMMARY_OPTION_IDS,
+    TRANSCRIPTION_FORMATS,
+    DEFAULT_TRANSCRIPTION_FORMAT,
+    TRANSCRIPTION_ACCURACY_LEVELS,
+    DEFAULT_TRANSCRIPTION_ACCURACY,
+)
 from src.JBGSecureFileHandler import SecureFileHandler
 from pathlib import Path
 import torch
@@ -116,7 +123,8 @@ def transcribe_audio(
     summarize: bool,
     summary_style: str,
     summary_prompt: str,
-    suspicious: bool,
+    transcription_format: str,
+    transcription_accuracy: str,
     questions: bool,
     speakers: bool,
 ):
@@ -158,7 +166,8 @@ def transcribe_audio(
             generate_summary=summarize,
             summary_style=summary_style,
             summary_prompt=summary_prompt,
-            find_suspicious_phrases=suspicious,
+            transcription_format=transcription_format,
+            transcription_accuracy=transcription_accuracy,
             suggest_follow_up_questions=questions,
             analyze_speakers=speakers,
             progress_callback=progress_callback,
@@ -250,7 +259,9 @@ async def upload_audio(
     summarize: bool = Form(False),
     summary_style: str = Form(""),
     summary_prompt: str = Form(""),
-    suspicious: bool = Form(False),
+    transcription_format: str = Form(""),
+    transcription_accuracy: str = Form(""),
+    suspicious: bool = Form(False),   # retired; accepted as a synonym below
     questions: bool = Form(False),
     speakers: bool = Form(False)
 ):
@@ -280,6 +291,23 @@ async def upload_audio(
         else:
             raise HTTPException(status_code=400, detail="Invalid summary style.")
 
+    # The three presentations replaced a separate "mark suspected errors"
+    # checkbox. An old client that still posts suspicious=true is read as
+    # asking for the marked presentation.
+    transcription_format = (transcription_format or "").strip().lower()
+    if not transcription_format:
+        transcription_format = "marked" if suspicious else DEFAULT_TRANSCRIPTION_FORMAT
+    if transcription_format not in TRANSCRIPTION_FORMATS:
+        raise HTTPException(status_code=400, detail="Invalid transcription format.")
+
+    # The accuracy choice is a ceiling on the Whisper model. An empty value
+    # means the default; an unknown one is rejected rather than guessed at.
+    transcription_accuracy = (transcription_accuracy or "").strip().lower()
+    if not transcription_accuracy:
+        transcription_accuracy = DEFAULT_TRANSCRIPTION_ACCURACY
+    if transcription_accuracy not in TRANSCRIPTION_ACCURACY_LEVELS:
+        raise HTTPException(status_code=400, detail="Invalid transcription accuracy.")
+
     summary_prompt = (summary_prompt or "").strip()
     if len(summary_prompt) > MAX_SUMMARY_PROMPT_CHARS:
         raise HTTPException(
@@ -298,7 +326,7 @@ async def upload_audio(
           OpenAI model of choice: {model}\n
           OpenAI API tasks: \n
           \tSummary: {summarize} ({summary_style}, {summary_prompt_source}, {len(summary_prompt)} tecken)\n
-          \tMark suspicious: {suspicious} \n
+          \tTranscription format: {transcription_format} \n          \tTranscription accuracy: {transcription_accuracy} \n
           \tGenerate questions: {questions} \n 
           \tSpeaker detection: {speakers}
           """)
@@ -337,7 +365,8 @@ async def upload_audio(
         summarize,
         summary_style,
         summary_prompt,
-        suspicious,
+        transcription_format,
+        transcription_accuracy,
         questions,
         speakers
     )

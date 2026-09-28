@@ -73,6 +73,108 @@ MAX_BUDGET_DOWNSHIFTS = 4
 # Kept for backwards compatibility with any external caller.
 MAX_INPUT_TOKENS = DEFAULT_MAX_INPUT_TOKENS
 
+# --- Transcription accuracy --------------------------------------------------
+#
+# The Whisper model was always the largest that fits in the available RAM. The
+# user can now set a ceiling instead: the chosen level is used exactly, or the
+# first level below it that fits. A choice is never upgraded past what was
+# asked for, so a deliberately fast run stays fast.
+
+STATISTICS_TABLE_HEADER = ["Moment", "Modell", "Anrop", "Tokens in", "Tokens ut", "Tid"]
+
+TRANSCRIPTION_ACCURACY_LEVELS = ("mycket_hog", "hog", "medel", "bas", "liten")
+DEFAULT_TRANSCRIPTION_ACCURACY = "medel"
+
+TRANSCRIPTION_ACCURACY_MODELS = {
+    "mycket_hog": "KBLab/kb-whisper-large",
+    "hog": "KBLab/kb-whisper-medium",
+    "medel": "KBLab/kb-whisper-small",
+    "bas": "KBLab/kb-whisper-base",
+    "liten": "KBLab/kb-whisper-tiny",
+}
+
+TRANSCRIPTION_ACCURACY_LABELS = {
+    "mycket_hog": "mycket hög",
+    "hog": "hög",
+    "medel": "medel",
+    "bas": "bas",
+    "liten": "liten",
+}
+
+# --- Speaker identification --------------------------------------------------
+#
+# A long recording is diarized segment by segment. Labelled independently, the
+# segments do not agree: "Intervjuobjekt 1" in one need not be the same person
+# as in the next, because the model cannot see what it decided earlier. Each
+# answer therefore ends with a register of the labels it used, which is parsed
+# off, carried forward and given to the next segment.
+
+# A rewriting task must give the whole text back, and normally gives back a
+# little more: speaker labels or [FEL?] markers add words. A result that is
+# materially shorter than its input means text was dropped, which no amount of
+# prompt wording can rule out. Below the warning level it is reported; below
+# the failure level the result is not trusted at all.
+REWRITE_MIN_WORD_RATIO_WARN = 0.90
+REWRITE_MIN_WORD_RATIO_FAIL = 0.70
+
+SPEAKER_REGISTER_SECTION_TITLE = "Identifierade talare:"
+
+SPEAKER_REGISTER_HEADING = "### TALARREGISTER"
+
+# The model does not always reproduce the heading exactly: it may drop the
+# hashes, bold it, or change the case. A block that is not recognised would be
+# left in the dialogue, so the match is deliberately loose.
+_SPEAKER_REGISTER_LINE_RE = re.compile(
+    r"^[ \t]*(?:#{1,6}[ \t]*)?[*_]*[ \t]*talarregister[ \t]*[*_:\-]*[ \t]*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+SPEAKER_REGISTER_SUFFIX = (
+    "AVSLUTA SVARET MED ETT TALARREGISTER:\n"
+    "Skriv sist i svaret raden " + SPEAKER_REGISTER_HEADING + " och därefter en "
+    "rad per talare du använt, på formen:\n"
+    "Beteckning: kort kännetecken\n\n"
+    "Kännetecknet ska vara sakligt och hjälpa till att känna igen samma person "
+    "senare i samtalet, till exempel vilken roll personen har eller vilka frågor "
+    "personen svarar på. Bedöm inte personen. Registret räknas inte som en del "
+    "av dialogen.\n\n"
+    "Skriv ingenting om talarna i själva dialogen: inga beskrivningar, "
+    "sammanfattningar eller kommentarer om vem som är vem, vare sig före, under "
+    "eller efter replikerna. Dialogen ska bara innehålla repliker med sin "
+    "beteckning. Allt som beskriver talarna hör hemma i registret."
+)
+
+SPEAKER_REGISTER_PREAMBLE = (
+    "TALARE SOM REDAN IDENTIFIERATS TIDIGARE I SAMTALET:\n"
+    "{register}\n\n"
+    "Använd samma beteckningar för dessa personer. Inför en ny beteckning bara "
+    "för en röst som inte finns i listan."
+)
+
+SPEAKER_CONTEXT_PREAMBLE = (
+    "SLUTET AV FÖREGÅENDE DEL, ENBART SOM SAMMANHANG:\n"
+    "{context}\n\n"
+    "Återge inte texten ovan i ditt svar. Den är redan behandlad. Börja ditt "
+    "svar vid den nya texten."
+)
+
+# Sentences of the preceding segment passed as context. They are given as
+# already-handled context rather than as overlap: the model is told not to
+# repeat them, so a reply split across a boundary can be attributed correctly
+# without the text appearing twice in the result.
+SPEAKER_CONTEXT_SENTENCES = 3
+
+# How the transcribed text is presented in the result document. Exactly one
+# form is included; the three are mutually exclusive.
+TRANSCRIPTION_FORMATS = ("raw", "timestamps", "marked")
+DEFAULT_TRANSCRIPTION_FORMAT = "raw"
+
+TRANSCRIPTION_FORMAT_HEADINGS = {
+    "raw": "Transkribering",
+    "timestamps": "Transkribering med tidsstämplar",
+    "marked": "Transkribering med markerade misstänkta fel",
+}
+
 # Upper bound on a user-supplied summary instruction.
 MAX_SUMMARY_PROMPT_CHARS = 20000
 
@@ -133,6 +235,7 @@ FALLBACK_SUMMARY_PROMPT = (
     "Hitta inte på information. Om något är oklart, skriv att det är oklart."
 )
 
+_SPEAKER_LINE_RE = re.compile(r"^([^:\n]{2,40}?\s*\d*)\s*:\s+\S")
 _SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?:…])\s+")
 _PARAGRAPH_BOUNDARY_RE = re.compile(r"\n\s*\n")
 
@@ -254,6 +357,15 @@ class JBGtranscriber():
         
         self.transcription = ""
         self.transcription_w_timestamps = ""
+        self.transcription_format = DEFAULT_TRANSCRIPTION_FORMAT
+        self.speaker_register = {}
+        self.transcription_accuracy = DEFAULT_TRANSCRIPTION_ACCURACY
+        # Statistics only: counts and timings, never any text.
+        self.model_calls = []
+        self.transcription_seconds = 0.0
+        self.current_task = ""
+        # Filled in once a model has actually loaded and transcribed.
+        self.transcriber_model_used = ""
         self.prompt_policy = self.load_prompt_policy()
         self.summary = ""
         self.marked_text = ""
@@ -360,6 +472,15 @@ class JBGtranscriber():
 
     # Set by call_openai: whether the last answer hit the length limit.
     last_answer_truncated = False
+
+    # Class-level defaults so the document can be written even by an instance
+    # that was not built through __init__.
+    model_calls = []
+    transcription_seconds = 0.0
+    current_task = ""
+    transcriber_model_used = ""
+    transcription_accuracy = DEFAULT_TRANSCRIPTION_ACCURACY
+    speaker_register = {}
 
     def load_prompt_policy(self):
         return JBGtranscriber.load_policy_file()
@@ -537,6 +658,7 @@ class JBGtranscriber():
         # TODO: Consider adding reasoning_effort='none' for gpt-5.1 to get GPT-5.1-level intelligence with ultra-low latency.
 
         client = openai.OpenAI(api_key=self.api_key)
+        started = time.time()
 
         completion = self._create_completion(
             client,
@@ -545,6 +667,15 @@ class JBGtranscriber():
                 {"role": "user", "content": input_message},
             ],
             max_output_tokens,
+        )
+
+        usage = getattr(completion, "usage", None)
+        self._record_model_call(
+            task=self.current_task or "OpenAI-anrop",
+            model=self.openai_model,
+            sent=getattr(usage, "prompt_tokens", None),
+            received=getattr(usage, "completion_tokens", None),
+            seconds=time.time() - started,
         )
 
         choice = completion.choices[0]
@@ -588,6 +719,7 @@ class JBGtranscriber():
         model's input budget, since an undivided text gives the best summary.
         Segmentation is a fallback for genuinely long recordings only.
         """
+        self.current_task = "Sammanfattning"
         instructions = self.resolve_summary_instructions(style=style, custom_prompt=custom_prompt)
 
         if not (self.transcription or "").strip():
@@ -842,7 +974,42 @@ class JBGtranscriber():
                 "av modellens svarslängd. Resultatet kan sakna text."
             )
 
-        return "\n\n".join(part for part in parts if part)
+        result = "\n\n".join(part for part in parts if part)
+        return result if self._rewrite_kept_the_text(task_name, text, result) else ""
+
+    def _rewrite_kept_the_text(self, task_name, original, result):
+        """Check that a rewriting step gave the whole text back.
+
+        The model is asked to return the text marked up, but nothing forces it
+        to: it may answer with only the passages it changed. That would replace
+        the transcription in the document with an excerpt of it, silently.
+        Comparing word counts catches it; a rewrite normally comes back
+        slightly longer than it went in.
+        """
+        before = len((original or "").split())
+        after = len((result or "").split())
+        if not before:
+            return True
+
+        ratio = after / before
+        if ratio < REWRITE_MIN_WORD_RATIO_FAIL:
+            logger.error(
+                f"{task_name}: svaret innehåller {after:,} ord mot {before:,} i "
+                f"originalet ({ratio:.0%}). Så mycket text saknas att resultatet "
+                "inte används.".replace(",", " ")
+            )
+            return False
+        if ratio < REWRITE_MIN_WORD_RATIO_WARN:
+            logger.warning(
+                f"{task_name}: svaret innehåller {after:,} ord mot {before:,} i "
+                f"originalet ({ratio:.0%}). Text kan saknas.".replace(",", " ")
+            )
+        else:
+            logger.info(
+                f"{task_name}: {after:,} ord tillbaka mot {before:,} in "
+                f"({ratio:.0%}).".replace(",", " ")
+            )
+        return True
 
     def _resolve_output_token_limit(self):
         """Resolve how many tokens the model may produce in one answer."""
@@ -888,17 +1055,22 @@ class JBGtranscriber():
     def find_suspicious_phrases(self):
         """Identifierar och markerar osannolika eller grammatiskt tveksamma ordkombinationer."""
         try:
+            self.current_task = "Markering av misstänkta fel"
             instructions = JBGtranscriber.policy_text(self.prompt_policy, "suspicious_phrases")
             self.marked_text = self._rewrite_whole_text(
                 instructions, self.transcription, "Markering av misstänkta fel"
             )
         except Exception as e:
             logger.error(f"An error occurred while finding suspicious phrases: {e}")
-            self.marked_text = "Markering av misstänkta fel i texten misslyckades"
+            # Left empty on purpose: when this is the chosen presentation, the
+            # document falls back to the raw text rather than printing an error
+            # message where the whole transcription should be.
+            self.marked_text = ""
 
     def suggest_follow_up_questions(self):
         """Föreslår fem relevanta uppföljningsfrågor baserat på transkriberingen."""
         try:
+            self.current_task = "Uppföljningsfrågor"
             instructions = JBGtranscriber.policy_text(
                 self.prompt_policy, "follow_up_questions", "Generera uppföljningsfrågor:"
             )
@@ -917,97 +1089,240 @@ class JBGtranscriber():
             logger.error(f"An error occurred while generating follow-up questions: {e}")
             self.follow_up_questions = "Förslag till uppföljande frågor misslyckades"
             
+    @staticmethod
+    def _split_speaker_register(answer):
+        """Separate the dialogue from the trailing speaker register.
+
+        Returns (dialogue, register) where register maps a label to its short
+        distinguishing note. A model that ignores the instruction simply yields
+        an empty register, and the labels are recovered from the dialogue.
+        """
+        text = (answer or "").strip()
+        if not text:
+            return "", {}
+
+        matches = list(_SPEAKER_REGISTER_LINE_RE.finditer(text))
+        if not matches:
+            return text, JBGtranscriber._labels_from_dialogue(text)
+
+        # Everything from the last heading onwards is the register; any earlier
+        # heading means the model repeated itself, so those blocks are dropped
+        # from the dialogue too rather than left sitting in the middle of it.
+        last = matches[-1]
+        dialogue = text[:last.start()].strip()
+        if len(matches) > 1:
+            logger.warning(
+                f"Talaranalys: {len(matches)} talarregister i ett svar. "
+                "Endast det sista används."
+            )
+            keep = []
+            cursor = 0
+            for m in matches[:-1]:
+                keep.append(text[cursor:m.start()])
+                # Skip the block: up to the next blank line or the next heading.
+                rest = text[m.end():]
+                stop = rest.find("\n\n")
+                cursor = m.end() + (stop if stop != -1 else len(rest))
+            keep.append(text[cursor:last.start()])
+            dialogue = "".join(keep).strip()
+
+        register = {}
+        for line in text[last.end():].splitlines():
+            line = line.strip().lstrip("-").strip()
+            if not line or ":" not in line:
+                continue
+            label, _, note = line.partition(":")
+            label = label.strip()
+            if label:
+                register[label] = note.strip()
+
+        if not register:
+            register = JBGtranscriber._labels_from_dialogue(dialogue)
+        return dialogue, register
+
+    @staticmethod
+    def _labels_from_dialogue(text):
+        """Recover speaker labels from the dialogue itself.
+
+        Used when the model did not produce a register. Only lines that begin
+        with a short label followed by a colon are considered.
+        """
+        register = {}
+        for line in (text or "").splitlines():
+            match = _SPEAKER_LINE_RE.match(line.strip())
+            if match:
+                register.setdefault(match.group(1).strip(), "")
+        return register
+
+    @staticmethod
+    def _append_speaker_register(dialogue, register):
+        """Put the speaker register once, at the end of the section."""
+        dialogue = (dialogue or "").strip()
+        described = {
+            label: note for label, note in (register or {}).items() if note.strip()
+        }
+        if not described:
+            return dialogue
+
+        lines = [SPEAKER_REGISTER_SECTION_TITLE]
+        for label in sorted(described):
+            lines.append(f"{label}: {described[label]}")
+        return (dialogue + "\n\n" + "\n".join(lines)).strip()
+
+    @staticmethod
+    def _merge_speaker_registers(known, new):
+        """Carry notes forward, keeping the first description of each speaker."""
+        merged = dict(known)
+        for label, note in new.items():
+            if label not in merged or not merged[label]:
+                merged[label] = note
+        return merged
+
+    @staticmethod
+    def _format_speaker_register(register):
+        return "\n".join(
+            f"- {label}: {note}" if note else f"- {label}"
+            for label, note in register.items()
+        )
+
+    def _speaker_context_tail(self, text, enc):
+        """The last few sentences of a segment, for continuity across a boundary."""
+        atoms = self._split_into_atoms(text)
+        if not atoms:
+            return ""
+        return "".join(atoms[-SPEAKER_CONTEXT_SENTENCES:]).strip()
+
+    def _diarize_segment(self, instructions, segment, part, total, register, context):
+        """Diarize one segment, given what is known about the speakers so far."""
+        prompt = instructions
+        if register:
+            prompt += "\n\n" + SPEAKER_REGISTER_PREAMBLE.format(
+                register=JBGtranscriber._format_speaker_register(register)
+            )
+        prompt += "\n\n" + SPEAKER_REGISTER_SUFFIX
+
+        body = ""
+        if context:
+            body += SPEAKER_CONTEXT_PREAMBLE.format(context=context) + "\n\n"
+        if total > 1:
+            body += f"(Detta är del {part} av {total}.)\n\n"
+        body += segment
+
+        answer = self.call_openai(
+            instructions=prompt,
+            input_message=body,
+            max_output_tokens=self._resolve_output_token_limit(),
+        ).content
+
+        if self.last_answer_truncated:
+            logger.error(
+                f"Talaranalys: del {part} av {total} kapades av modellens svarslängd. "
+                "Delar av texten kan saknas."
+            )
+        return JBGtranscriber._split_speaker_register(answer)
+
     def do_analyze_speakers(self):
-        """Analysera transkriberingen med avseende på vilka talare som säger vad"""
-        
-        prompt = JBGtranscriber.policy_text(
+        """Analysera transkriberingen med avseende på vilka talare som säger vad."""
+        self.do_analyze_speakers_splitted()
+
+    def do_analyze_speakers_splitted(self):
+        """Label the transcription with who is speaking.
+
+        The work rewrites the text rather than condensing it, so the segment
+        size is capped by how much the model can answer. Segments are processed
+        in order, each one told which speakers have already been identified and
+        given the tail of the previous segment as context, so that the labels
+        mean the same thing from beginning to end.
+        """
+        self.current_task = "Talaranalys"
+        enc = self._get_encoder_for_segmentation()
+
+        instructions = JBGtranscriber.policy_text(
             self.prompt_policy,
             "speaker_diarization",
             "Försök att identifiera olika röster i följande transkribering:",
         )
-        
-        input_message = f"""
-            ------------------------
-            {self.transcription}
-            ------------------------
-        """
-        
+        available = self._rewrite_segment_budget(instructions, enc)
+
+        # No overlap: continuity is carried by the register and the context
+        # tail instead, so that nothing is emitted twice.
+        segments = self._split_into_segments(
+            self.transcription, enc, max_tokens=available, overlap_sentences=0
+        )
+
+        logger.info(f"Talaranalys: {len(segments)} segment (budget {available} tokens).")
+
+        register = {}
+        parts = []
         try:
-            self.analyze_speakers = self.call_openai(
-                instructions=prompt,
-                input_message=input_message,
-                max_output_tokens=self._resolve_output_token_limit(),
-            ).content
+            for i, segment in enumerate(segments):
+                if i > 0:
+                    time.sleep(SEGMENT_PAUSE_SECONDS)
+                    logger.info(f"Bearbetar segment {i+1}/{len(segments)}...")
+
+                context = self._speaker_context_tail(segments[i - 1], enc) if i > 0 else ""
+                dialogue, found = self._diarize_segment(
+                    instructions, segment, i + 1, len(segments), register, context
+                )
+                register = JBGtranscriber._merge_speaker_registers(register, found)
+                if dialogue:
+                    parts.append(dialogue)
+
+            if register:
+                logger.info(
+                    "Talaranalys identifierade: "
+                    + ", ".join(sorted(register.keys()))
+                )
+            self.speaker_register = register
+
+            merged = "\n\n".join(parts)
+            # The register and context tail should prevent repeated text, but
+            # the seam cleanup is kept as a safety net.
+            dialogue = self._deduplicate_blocks(merged) if len(parts) > 1 else merged
+
+            if not self._rewrite_kept_the_text("Talaranalys", self.transcription, dialogue):
+                self.analyze_speakers = "Försöket till identifiering av talare gav ofullständig text"
+                self.speaker_register = {}
+                return
+
+            # One consolidated register at the end of the section, rather than
+            # a description of the speakers after every segment.
+            self.analyze_speakers = JBGtranscriber._append_speaker_register(dialogue, register)
+
         except Exception as e:
             logger.error(f"An error occurred while analyzing speakers: {e}")
             self.analyze_speakers = "Försöket till identifiering av talare misslyckades"
+            self.speaker_register = {}
 
-    def do_analyze_speakers_splitted(self):
-        
-        # Setup encoder for model
-        enc = self._get_encoder_for_segmentation()
-
-        # Diarization rewrites the transcription rather than condensing it: the
-        # model has to give every line back with a speaker label. The budget is
-        # therefore capped by how much the model can *answer*, not by how much
-        # it can read. Sized by the context window alone, a long interview would
-        # be sent in one piece and the reply cut off part way through, losing
-        # the rest of the text.
-        prompt_text = JBGtranscriber.policy_text(
-            self.prompt_policy,
-            "speaker_diarization",
-            "Försök att identifiera olika röster i följande transkribering:",
-        )
-        available = self._rewrite_segment_budget(prompt_text, enc)
-
-        # För talaranalys vill vi undvika överlappade segment för att slippa duplikationer
-        segments = self._split_into_segments(
-            self.transcription,
-            enc,
-            max_tokens=available,
-            overlap_sentences=0,  # viktigt: ingen överlapp för diarization
-        )
-        
-        # No need to split text into segments
-        if len(segments) == 1:
-            self.do_analyze_speakers()
-        else:
-            # Text resulted in multiple segments
-            diarized_segments = []
-            prompt = JBGtranscriber.policy_text(
-                self.prompt_policy,
-                "speaker_diarization",
-                "Försök att identifiera olika röster i följande transkribering:",
-            )
-
-            try:
-                for i, segment in enumerate(segments):
-                    if i > 0:
-                        time.sleep(5)  # undvik rate limit för multiple API calls
-
-                    logger.info(f"Bearbetar segment {i+1}/{len(segments)}...")
-                    context = f"\nDetta är del {i+1}. Fortsätt numrera talare konsekvent.\n"
-                    diarized = self.call_openai(
-                        instructions=prompt + context,
-                        input_message=segment,
-                        max_output_tokens=self._resolve_output_token_limit(),
-                    ).content
-                    if self.last_answer_truncated:
-                        logger.error(
-                            f"Talaranalys: segment {i+1} kapades av modellens svarslängd. "
-                            "Delar av texten kan saknas."
-                        )
-                    diarized_segments.append(diarized)
-
-                # Slå ihop och städa bort uppenbara upprepningar
-                raw_diarization = "\n\n".join(diarized_segments)
-                self.analyze_speakers = self._deduplicate_blocks(raw_diarization)
-
-            except Exception as e:
-                logger.error(f"An error occurred while analyzing speakers: {e}")
-                self.analyze_speakers = "Försöket till identifiering av talare misslyckades"
-     
      # Some internal help functions
+    def _model_candidates_for_accuracy(self):
+        """Models to try, starting at the accuracy the user asked for.
+
+        The chosen level is the ceiling: everything more accurate is dropped
+        from the list, so a deliberately fast run is never silently upgraded.
+        Everything below it is kept, so the existing RAM fallback still applies.
+        """
+        level = self.transcription_accuracy
+        if level not in TRANSCRIPTION_ACCURACY_MODELS:
+            logger.warning(
+                f"Okänd noggrannhet '{level}'. Använder '{DEFAULT_TRANSCRIPTION_ACCURACY}'."
+            )
+            level = DEFAULT_TRANSCRIPTION_ACCURACY
+            self.transcription_accuracy = level
+
+        wanted = TRANSCRIPTION_ACCURACY_MODELS[level]
+        candidates = list(self.TRANSCRIBER_MODEL_CANDIDATES)
+        if wanted in candidates:
+            candidates = candidates[candidates.index(wanted):]
+        else:
+            logger.warning(f"{wanted} finns inte bland kandidaterna. Använder hela listan.")
+
+        logger.info(
+            f"Vald noggrannhet: {TRANSCRIPTION_ACCURACY_LABELS.get(level, level)} "
+            f"({wanted}). Kandidater: {', '.join(candidates)}"
+        )
+        return candidates
+
     def _tokenize(self, text, enc):
         return enc.encode(text)
 
@@ -1262,7 +1577,10 @@ class JBGtranscriber():
             else:
                 raise ValueError("Ingen audio_stream tillgänglig")
 
-        for model_id in self.TRANSCRIBER_MODEL_CANDIDATES:
+        candidates = self._model_candidates_for_accuracy()
+        transcription_started = time.time()
+
+        for model_id in candidates:
             try:
                 logger.info(f"Trying model: {model_id}")
                 required_ram_gb = self.TRANSCRIBER_MODEL_RAM_REQUIREMENTS.get(model_id, None)
@@ -1313,7 +1631,20 @@ class JBGtranscriber():
                 )
 
                 self.transcription, self.transcription_w_timestamps = self._postprocess_result(result)
-                logger.info(f" Transcription successful with model: {model_id}")
+                self.transcription_seconds = time.time() - transcription_started
+                word_count = f"{len((self.transcription or '').split()):,}".replace(",", " ")
+                logger.info(
+                    f" Transcription successful with model: {model_id} "
+                    f"({word_count} ord, "
+                    f"{JBGtranscriber._format_duration(self.transcription_seconds)})"
+                )
+                self.transcriber_model_used = model_id
+                if model_id != TRANSCRIPTION_ACCURACY_MODELS.get(self.transcription_accuracy):
+                    logger.warning(
+                        f"Vald noggrannhet '{self.transcription_accuracy}' motsvarar "
+                        f"{TRANSCRIPTION_ACCURACY_MODELS.get(self.transcription_accuracy)}, "
+                        f"men {model_id} användes i stället."
+                    )
 
                 
                 if not self.secure_handler:
@@ -1569,6 +1900,153 @@ class JBGtranscriber():
             paragraph = document.add_paragraph()
             JBGtranscriber._add_inline_word_markup(paragraph, stripped)
 
+    def _record_model_call(self, task, model, sent, received, seconds):
+        """Note one model call for the statistics table.
+
+        Only counts and timings are kept - never any part of the text.
+        """
+        # Never append to the class-level default, which would be shared
+        # between instances; give this instance its own list first.
+        if "model_calls" not in self.__dict__:
+            self.model_calls = []
+
+        self.model_calls.append({
+            "task": task,
+            "model": model,
+            "sent": sent or 0,
+            "received": received or 0,
+            "seconds": seconds,
+        })
+
+    def _model_statistics_rows(self):
+        """Aggregate the recorded calls, one row per task and model."""
+        rows = []
+        order = []
+        totals = {}
+        for call in self.model_calls:
+            key = (call["task"], call["model"])
+            if key not in totals:
+                totals[key] = {"calls": 0, "sent": 0, "received": 0, "seconds": 0.0}
+                order.append(key)
+            t = totals[key]
+            t["calls"] += 1
+            t["sent"] += call["sent"]
+            t["received"] += call["received"]
+            t["seconds"] += call["seconds"]
+
+        for key in order:
+            task, model = key
+            t = totals[key]
+            rows.append([
+                task, model, str(t["calls"]),
+                f"{t['sent']:,}".replace(",", " "),
+                f"{t['received']:,}".replace(",", " "),
+                JBGtranscriber._format_duration(t["seconds"]),
+            ])
+
+        if self.transcription_seconds:
+            rows.insert(0, [
+                "Transkribering",
+                self.transcriber_model_used or "-",
+                "1", "-", "-",
+                JBGtranscriber._format_duration(self.transcription_seconds),
+            ])
+
+        if len(rows) > 1:
+            rows.append([
+                "Totalt", "",
+                str(sum(t["calls"] for t in totals.values()) + (1 if self.transcription_seconds else 0)),
+                f"{sum(t['sent'] for t in totals.values()):,}".replace(",", " "),
+                f"{sum(t['received'] for t in totals.values()):,}".replace(",", " "),
+                JBGtranscriber._format_duration(
+                    sum(t["seconds"] for t in totals.values()) + (self.transcription_seconds or 0)
+                ),
+            ])
+        return rows
+
+    @staticmethod
+    def _format_duration(seconds):
+        seconds = int(round(seconds or 0))
+        if seconds < 60:
+            return f"{seconds} s"
+        return f"{seconds // 60} min {seconds % 60} s"
+
+    @staticmethod
+    def _add_word_table(document, content):
+        """Render the statistics as a real Word table."""
+        header, rows = content[0], content[1:]
+        if not rows:
+            return
+        table = document.add_table(rows=1, cols=len(header))
+        table.style = "Light Grid Accent 1"
+        for cell, title in zip(table.rows[0].cells, header):
+            cell.text = title
+            for run in cell.paragraphs[0].runs:
+                run.bold = True
+        for row in rows:
+            cells = table.add_row().cells
+            for cell, value in zip(cells, row):
+                cell.text = str(value)
+
+    def _transcription_provenance(self):
+        """A short note on which model produced the transcription.
+
+        The chosen accuracy is a ceiling, and the model actually used may be a
+        smaller one if the available RAM did not allow the choice. That
+        fallback is otherwise invisible, so it is recorded here: someone who
+        picked a level deserves to know what they got.
+        """
+        level = self.transcription_accuracy
+        wanted = TRANSCRIPTION_ACCURACY_MODELS.get(level, "")
+        label = TRANSCRIPTION_ACCURACY_LABELS.get(level, level)
+        used = self.transcriber_model_used
+
+        if not used:
+            return ""
+
+        line = f"Vald noggrannhet: {label}. Modell som användes: {used}."
+        if wanted and used != wanted:
+            line += (
+                f" Den valda nivån motsvarar {wanted}, men tillgängligt minne "
+                "räckte inte, så en mindre modell användes i stället."
+            )
+        return line
+
+    def _transcription_section(self):
+        """Return the single transcription section for the result document.
+
+        The three presentations are mutually exclusive. If the chosen one is
+        unavailable - marking failed, or the model returned no timestamps - the
+        raw text is used instead and the document says so, rather than leaving
+        the reader with an error message where the transcription should be.
+        """
+        chosen = self.transcription_format if self.transcription_format in TRANSCRIPTION_FORMATS \
+            else DEFAULT_TRANSCRIPTION_FORMAT
+
+        content = {
+            "raw": self.transcription,
+            "timestamps": self.transcription_w_timestamps,
+            "marked": self.marked_text,
+        }.get(chosen, self.transcription)
+
+        if not (content or "").strip() and chosen != "raw":
+            logger.warning(
+                f"Ingen text tillgänglig i formatet '{chosen}'. Använder rå text i stället."
+            )
+            note = {
+                "timestamps": "[Tidsstämplar var inte tillgängliga. Rå text visas i stället.]",
+                "marked": "[Markering av misstänkta fel kunde inte genomföras. Rå text visas i stället.]",
+            }.get(chosen, "")
+            body = (self.transcription or "").strip()
+            return (
+                TRANSCRIPTION_FORMAT_HEADINGS["raw"],
+                (note + "\n\n" + body).strip() if note else body,
+                "plain",
+            )
+
+        render_mode = "marked" if chosen == "marked" else "plain"
+        return (TRANSCRIPTION_FORMAT_HEADINGS[chosen], content, render_mode)
+
     def write_to_output_file(self):
         """Write transcription and selected analyses to a Word document.
 
@@ -1585,13 +2063,16 @@ class JBGtranscriber():
         elif self.export_path.suffix.lower() != ".docx":
             raise ValueError(f"Output path must use the .docx extension: {self.export_path}")
 
+        statistics = self._model_statistics_rows()
         sections = [
-            ("Rå transkribering", self.transcription, "plain"),
-            ("Transkribering med tidsstämplar", self.transcription_w_timestamps, "plain"),
+            self._transcription_section(),
             ("Sammanfattning", self.summary, "structured"),
-            ("Transkription med markerade misstänkta fraser", self.marked_text, "marked"),
             ("Uppföljningsfrågor", self.follow_up_questions, "structured"),
             ("Försök till identifiering av olika talare", self.analyze_speakers, "speakers"),
+            # Provenance and statistics belong after the content, not between
+            # the transcription and the analyses.
+            ("Om transkriberingen", self._transcription_provenance(), "plain"),
+            ("Statistik", [STATISTICS_TABLE_HEADER] + statistics if statistics else "", "table"),
         ]
 
         temp_path = self.export_path.with_name(self.export_path.name + ".tmp")
@@ -1609,6 +2090,8 @@ class JBGtranscriber():
                     JBGtranscriber._add_structured_word_content(document, content)
                 elif render_mode == "marked":
                     JBGtranscriber._add_plain_word_content(document, content, parse_inline=True)
+                elif render_mode == "table":
+                    JBGtranscriber._add_word_table(document, content)
                 elif render_mode == "speakers":
                     JBGtranscriber._add_plain_word_content(document, content, parse_inline=True, speaker_labels=True)
                 else:
@@ -1643,12 +2126,31 @@ class JBGtranscriber():
         generate_summary=False,
         summary_style=None,
         summary_prompt=None,
-        find_suspicious_phrases=False,
+        transcription_format=DEFAULT_TRANSCRIPTION_FORMAT,
+        transcription_accuracy=DEFAULT_TRANSCRIPTION_ACCURACY,
+        find_suspicious_phrases=None,
         suggest_follow_up_questions=False,
         analyze_speakers=False,
         progress_callback=None
     ):
-        """Perform all transcription steps"""
+        """Perform all transcription steps.
+
+        transcription_format decides which single form of the transcribed text
+        goes into the document. Marking suspected errors is the work behind the
+        "marked" form, so it runs when that form is chosen; find_suspicious_phrases
+        may still be passed explicitly to force it either way.
+        """
+
+        self.transcription_accuracy = (
+            transcription_accuracy if transcription_accuracy in TRANSCRIPTION_ACCURACY_LEVELS
+            else DEFAULT_TRANSCRIPTION_ACCURACY
+        )
+        self.transcription_format = (
+            transcription_format if transcription_format in TRANSCRIPTION_FORMATS
+            else DEFAULT_TRANSCRIPTION_FORMAT
+        )
+        if find_suspicious_phrases is None:
+            find_suspicious_phrases = self.transcription_format == "marked"
         
         def report(msg):
             logger.info(msg)
@@ -1662,15 +2164,18 @@ class JBGtranscriber():
         report("Transkriberar ljudfilen...")
         self.transcribe()
         
-        # Generate a summary if requested
-        if generate_summary:
-            report(f"Genererar sammanfattning...")
-            self.generate_summary(style=summary_style, custom_prompt=summary_prompt)
-        
+        # The steps run in the order they appear in the GUI, which is also
+        # the order the sections appear in the document. Marking suspected
+        # errors produces the transcription section itself, so it is first.
         # Find and mark suspicious phrases if requested
         if find_suspicious_phrases:
             report(f"Letar misstänkta fel...")
             self.find_suspicious_phrases()
+        
+        # Generate a summary if requested
+        if generate_summary:
+            report(f"Genererar sammanfattning...")
+            self.generate_summary(style=summary_style, custom_prompt=summary_prompt)
         
         # Suggest follow-up questions if requested
         if suggest_follow_up_questions:
@@ -1746,7 +2251,7 @@ def main():
         transcriber.perform_transcription_steps(
             generate_summary=True,
             summary_style=summary_style,
-            find_suspicious_phrases=True,
+            transcription_format="marked",
             suggest_follow_up_questions=True,
             analyze_speakers=True
         )

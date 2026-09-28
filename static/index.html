@@ -22,13 +22,35 @@
         <label>
             <input type="checkbox" id="enableEncryption" title="Tillser att din ljudfil inte sparas okrypterad" checked>
             Använd kryptering (rekommenderas)
-        </label><br><br> 
+        </label>
+
+        <!-- Transcription settings -->
+        <fieldset class="settings-panel" id="transcription-options">
+            <legend><h4>Inställningar för transkriberingen</h4></legend>
+            <label for="accuracySelect" title="Högre noggrannhet ger färre fel men tar längre tid och kräver mer minne">Välj noggrannhet:</label><br>
+            <select id="accuracySelect" style="width: 100%; max-width: 400px;">
+                <option value="mycket_hog">mycket hög</option>
+                <option value="hog">hög</option>
+                <option value="medel" selected>medel</option>
+                <option value="bas">bas</option>
+                <option value="liten">liten</option>
+            </select>
+            <label>Ange hur du vill ha den transkriberade texten:</label>
+            <div class="transcription-format-choice">
+                <label><input type="radio" name="transcriptionFormat" value="raw" checked
+                       title="Den transkriberade texten som den är, utan tidsstämplar eller markeringar"> Rå text</label>
+                <label><input type="radio" name="transcriptionFormat" value="timestamps"
+                       title="Texten uppdelad i avsnitt med tidsstämplar"> Med tidsstämplar</label>
+                <label><input type="radio" name="transcriptionFormat" value="marked"
+                       title="Misstänkta transkriberingsfel markeras mellan taggarna [FEL?] och [/FEL?]"> Med markering av misstänkta fel</label>
+            </div>
+        </fieldset>
 
         <!-- Display checkboxes for OpenAI API call options -->
-        <fieldset style="margin-top: 1rem;" id="ai-options">
-            <legend><h4>Lägg till OpenAI-baserad textanalys</h4></legend>
+        <fieldset class="settings-panel" id="ai-options">
+            <legend><h4>Lägg till mer OpenAI-baserad textanalys</h4></legend>
             <label for="apiKey" title="Ett lösenord du får av lokalsamordnaren, se lathunden">Skriv in din API-nyckel:</label><br>
-            <input type="password" id="apiKey" placeholder="sk-..." style="width: 100%; max-width: 400px;"><br><br>
+            <input type="password" id="apiKey" placeholder="sk-..." style="width: 100%; max-width: 400px;">
             <label for="modelSelect" title="Nyare modeller ger bättre prestanda men kostar mer att använda">Välj språkmodell för analysen:</label><br>
             <select id="modelSelect" style="width: 100%; max-width: 400px;">
                 <option value="gpt-5.6-terra" >gpt-5.6-terra</option>
@@ -36,7 +58,7 @@
                 <option value="gpt-5.4-mini" >gpt-5.4-mini</option>
                 <option value="gpt-5.2" selected>gpt-5.2</option>
                 <option value="gpt-5.1">gpt-5.1</option>
-            </select><br><br>
+            </select>
             <label>Ange vilken textanalys du vill göra:</label><br>
             <label><input type="checkbox" id="optSummary" title="Genererar en sammanfattning i stil med Chat-GPT"> Generera sammanfattning</label>
             <div id="summaryOptions" class="summary-options" hidden>
@@ -48,8 +70,7 @@
                     <button type="button" id="openSummaryEditor" class="link-button">Redigera promptinstruktioner</button>
                     <span id="summaryPromptState" class="summary-prompt-state" hidden></span>
                 </div>
-            </div><br>
-            <label><input type="checkbox" id="optSuspicious" title="Markerar misstänkta transkriberingsfel mellan taggarna [FEL?] och [/FEL?]"> Markera misstänkta fel i transkriberingen</label><br>
+            </div>
             <label><input type="checkbox" id="optQuestions" title="Genererar förslag på uppföljningsfrågor baserat på den transkriberade texten"> Föreslå följdfrågor baserat på innehållet</label><br>
             <label><input type="checkbox" id="optSpeakers" title="Försöker dela upp texten mellan olika talare baserat på ordförråd, etc."> Identifiera olika talare baserat på innehåll (beta)</label>
         </fieldset>

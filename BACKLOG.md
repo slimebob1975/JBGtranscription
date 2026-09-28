@@ -4,6 +4,36 @@
 - [ ] `call_openai_simple` is no longer used by anything and could be removed.
 
 ## Planned improvments
+- [ ] Improve speaker identification, which is still marked as beta, rather than
+      retiring it now that the Fråga–Svar summary covers part of the same ground.
+      Fråga–Svar rewrites the text and assumes an interview structure; speaker
+      identification labels the text as it stands and works on recordings that
+      are not question-and-answer, so the two are not interchangeable. Known
+      weaknesses:
+      - `_deduplicate_blocks` is still applied as a safety net at the seams. It
+        should be possible to drop it now that the register and the context tail
+        prevent repeated text, but that needs confirming on real recordings.
+      - Consider offering the diarized text as a fourth presentation of the
+        transcription ("Med talarangivelser") rather than as a separate section,
+        once identity is stable and the speaker analysis is in place.
+      - Drop the "(beta)" label once it is dependable.
+- [ ] Add a factual per-speaker analysis on top of stable identities: which
+      topics each speaker returned to, what they stated, roughly how much they
+      spoke. It must stay descriptive, never evaluative - "Intervjuperson 1
+      återkom ofta till behovet av säkra rutiner för AI-utveckling", not
+      "Intervjuperson 1 verkar orolig för att rutinerna inte fungerar". The
+      transcript does not support inferences about a person's state of mind,
+      and the subjects are identifiable staff in a supervisory file.
+- [ ] Remove the participant labels from the Fråga–svar summary, so that saying
+      *who* spoke belongs to speaker identification alone and saying *what* was
+      said belongs to the summary. Answers that differ in substance should still
+      be rendered as separate "Svar" blocks, with the prose carrying the fact
+      that several views were expressed, so that information is not lost with
+      the labels.
+- [ ] Make `start_local_service` configure itself on first run: detect the
+      installed Python versions and offer them as a numbered list, and suggest
+      a temporary directory and a dev root. Save the answers and reuse them on
+      later starts. Add a `--reinstall` flag to run the configuration again.
 - [ ] Let the user edit the instructions for the other analyses too
       (suspected errors, follow-up questions, speaker identification), reusing
       the summary prompt editor.
@@ -12,10 +42,30 @@
 - [ ] Show an estimated cost or segment count before upload, now that the
       segment count is predictable from the transcription length.
 
-- [ ] Replace the inline textarea with a floating panel that opens over the page,
-      so the form height does not change when the instruction is shown.
-
 ## Solved
+- [x] Check that a rewriting step gave the whole text back, by comparing word
+      counts, instead of trusting the model to follow the instruction
+- [x] Move "Om transkriberingen" to the end of the document and add a "Statistik"
+      table of execution time and tokens sent and received per model
+- [x] Configure logging once per process, so a run no longer leaves empty log
+      files behind, and keep third-party request logging out of the log file
+      since it contained the whole transcription in clear text
+- [x] Let the user set a ceiling for the Whisper model with a "Välj noggrannhet:"
+      dropdown, in a new "Inställningar för transkriberingen" panel, and record
+      in the document which model actually ran
+- [x] Carry speaker identity across segments with a register passed from one
+      segment to the next, pass the previous segment's last sentences as
+      context so boundaries are attributed correctly, and use one input shape
+      for both the single-call and segmented paths
+- [x] Move the prompt editor into a floating panel opened from a link, so the
+      form height no longer changes when the instruction is shown, and centre it
+      on the visible window rather than on the iframe's own viewport
+- [x] Trim the summary panel: the option description is carried by the tooltip
+      alone, and no label is shown while an unedited default is in place
+- [x] Present the transcribed text in one of three mutually exclusive forms,
+      chosen with a radio group instead of a separate "mark suspected errors"
+      checkbox
+- [x] Add a "Fråga-Svar" option to the summary types
 - [x] Give every OpenAI call an output limit, negotiating `max_completion_tokens`
       against `max_tokens` per model, and detect answers cut off by that limit
 - [x] Segment `find_suspicious_phrases` and `suggest_follow_up_questions`
