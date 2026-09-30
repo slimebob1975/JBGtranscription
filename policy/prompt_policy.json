@@ -14,8 +14,9 @@
                 "- Lyft därefter fram de viktigaste punkterna i punktform.",
                 "- Ta med både det som fungerar bra och det som upplevs som problem.",
                 "- Avsluta med de viktigaste slutsatserna.",
-                "- Nämn inga egennamn.",
+                "- Nämn inga personnamn. Beskriv personer utifrån deras roll, till exempel \"intervjuobjektet\" eller \"en handläggare\". Namn på myndigheter, arbetslöshetskassor och andra organisationer får däremot användas.",
                 "- Använd ett tydligt och myndighetsanpassat språk.",
+                "- Förklara kortfattat facktermer, interna uttryck och inarbetade smeknamn på regelverk första gången de används, om innebörden inte framgår av sammanhanget.",
                 "- Hitta inte på information. Om något är oklart, skriv att det är oklart."
             ]
         },
@@ -37,8 +38,9 @@
                 "- Redovisa både positiva och negativa erfarenheter samt olika uppfattningar om sådana förekommer.",
                 "- Bevara viktiga nyanser, förbehåll och osäkerheter, men korta bort upprepningar och detaljer som saknar betydelse för helheten.",
                 "- Avsluta med de viktigaste slutsatserna eller iakttagelserna från samtalet.",
-                "- Nämn inga egennamn.",
+                "- Nämn inga personnamn. Beskriv personer utifrån deras roll, till exempel \"intervjuobjektet\" eller \"en handläggare\". Namn på myndigheter, arbetslöshetskassor och andra organisationer får däremot användas.",
                 "- Använd ett tydligt och myndighetsanpassat språk.",
+                "- Förklara kortfattat facktermer, interna uttryck och inarbetade smeknamn på regelverk första gången de används, om innebörden inte framgår av sammanhanget.",
                 "- Hitta inte på information. Om något är oklart, skriv att det är oklart."
             ]
         },
@@ -58,12 +60,13 @@
                 "- Redovisa problem, positiva erfarenheter, förbättringsförslag och andra betydelsefulla iakttagelser.",
                 "- Beskriv olika uppfattningar eller perspektiv när sådana uttrycks.",
                 "- Bevara viktiga nyanser, tveksamheter, motsägelser och förbehåll.",
-                "- Ange vem som framför en uppgift när det behövs för förståelsen, exempelvis \"intervjuobjektet uppger att\", men nämn inga egennamn.",
+                "- Ange vem som framför en uppgift när det behövs för förståelsen, exempelvis \"intervjuobjektet uppger att\". Nämn inga personnamn. Beskriv personer utifrån deras roll, till exempel \"intervjuobjektet\" eller \"en handläggare\". Namn på myndigheter, arbetslöshetskassor och andra organisationer får däremot användas.",
                 "- Följ i huvudsak de ämnesblock som förekommer i samtalet. Slå inte samman resonemang från olika delar av intervjun till nya övergripande teman eller analytiska kategorier.",
                 "- Om samma fråga återkommer kan den sammanfattas tillsammans endast när det förbättrar läsbarheten utan att förändra hur resonemanget utvecklades.",
                 "- Sammanfatta och kondensera det som sägs, men bevara även relevanta sakuppgifter som inte hör till de allra mest centrala slutsatserna.",
                 "- Korta bort onödiga upprepningar och samtalsmässiga utvikningar som saknar sakligt innehåll.",
                 "- Använd ett tydligt och myndighetsanpassat språk.",
+                "- Förklara kortfattat facktermer, interna uttryck och inarbetade smeknamn på regelverk första gången de används, om innebörden inte framgår av sammanhanget.",
                 "- Hitta inte på information och dra inte slutsatser som saknar stöd i transkriberingen. Om något är oklart, beskriv det som oklart."
             ]
         },
@@ -84,11 +87,13 @@
                 "- Ta med relevanta fakta, erfarenheter, exempel, problem, positiva aspekter och förbättringsförslag.",
                 "- Bevara viktiga nyanser, förbehåll, motsägelser och osäkerheter.",
                 "- Korta bort upprepningar, utfyllnad, hälsningsfraser och andra delar som saknar betydelse för sakinnehållet.",
+                "- Avsluta med samtalets sista sakinnehåll. Ta inte med avslutande artighetsfraser, tack och avsked eller överenskommelser om fortsatt kontakt, om de inte har betydelse för sakinnehållet.",
                 "- Behåll innehållets ordningsföljd och flytta inte uppgifter mellan olika delar av samtalet för att skapa en tematisk struktur.",
                 "- Om ett ämne återkommer senare i samtalet ska det återges där det återkommer, i stället för att flyttas tillbaka och slås samman med den tidigare diskussionen.",
                 "- Ge en förkortad men sammanhängande återgivning av hela det relevanta samtalsförloppet, inte bara av de viktigaste slutsatserna.",
-                "- Nämn inga egennamn.",
+                "- Nämn inga personnamn. Beskriv personer utifrån deras roll, till exempel \"intervjuobjektet\" eller \"en handläggare\". Namn på myndigheter, arbetslöshetskassor och andra organisationer får däremot användas.",
                 "- Använd ett tydligt och myndighetsanpassat språk.",
+                "- Förklara kortfattat facktermer, interna uttryck och inarbetade smeknamn på regelverk första gången de används, om innebörden inte framgår av sammanhanget.",
                 "- Hitta inte på information och dra inte slutsatser som saknar stöd i transkriberingen. Om något är oklart, skriv att det är oklart."
             ]
         },
@@ -107,7 +112,7 @@
                 "",
                 "För varje tema, inkludera följande:",
                 "- En kort introduktion av ämnet.",
-                "- Beskriv vad olika personer uttryckte, gärna med variationsrikedom, men nämn inga egennamn.",
+                "- Beskriv vad olika personer uttryckte, gärna med variationsrikedom. Nämn inga personnamn. Beskriv personer utifrån deras roll, till exempel \"intervjuobjektet\" eller \"en handläggare\". Namn på myndigheter, arbetslöshetskassor och andra organisationer får däremot användas.",
                 "- Sammanfatta underliggande orsaker, motiv och konsekvenser när de framkommer.",
                 "- Redovisa olika perspektiv om sådana finns.",
                 "- Inkludera representativa exempel eller omskrivna uttryck från intervjun för att illustrera resonemanget.",
@@ -118,6 +123,7 @@
                 "- Använd punktform där det ökar tydlighet och läsbarhet.",
                 "- Dra på slutet de viktigaste slutsatserna.",
                 "",
+                "Förklara kortfattat facktermer, interna uttryck och inarbetade smeknamn på regelverk första gången de används, om innebörden inte framgår av sammanhanget.",
                 "Du får inte hitta på information, men om något verkar oklart, beskriv det som ett tolkningsutrymme.",
                 "Sammanställningen ska kunna användas som beslutsunderlag eller för vidare analys."
             ]
@@ -149,7 +155,7 @@
                 "- Behåll uttryck för osäkerhet, exempelvis \"jag tror\", \"jag vet inte\" eller \"det är oklart\", när de har betydelse för hur svaret ska förstås.",
                 "- Förvandla inte deltagarnas resonemang till egna analyser, slutsatser eller bedömningar.",
                 "- Lägg inte till information som inte finns i transkriberingen.",
-                "- Nämn inga egennamn. Använd vid behov neutrala beteckningar som \"Intervjuare\", \"Deltagare 1\", \"Deltagare 2\" eller \"Flera deltagare\".",
+                "- Nämn inga personnamn. Beskriv personer utifrån deras roll, till exempel \"intervjuobjektet\" eller \"en handläggare\". Namn på myndigheter, arbetslöshetskassor och andra organisationer får däremot användas. Använd vid behov neutrala beteckningar som \"Intervjuare\", \"Deltagare 1\", \"Deltagare 2\" eller \"Flera deltagare\".",
                 "- Använd ett tydligt och myndighetsanpassat språk, men behåll karaktären av fråga och svar.",
                 "",
                 "Använd i första hand följande struktur:",
