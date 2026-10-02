@@ -63,6 +63,8 @@
       segment count is predictable from the transcription length.
 
 ## Solved
+- [x] Give the card one centred content column, so the grey panels have the same
+      gap on both sides and the headings line up with their left edge
 - [x] Correct the GUI tooltips: several described behaviour that had since
       changed, most of all the marked-errors option, which promised `[FEL?]`
       tags that the document renderer turns into highlighting

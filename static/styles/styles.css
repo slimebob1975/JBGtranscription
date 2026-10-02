@@ -1,4 +1,9 @@
 /* === Grundläggande inställningar === */
+:root {
+    /* Width of the grey panels, and of the column everything else lines up to. */
+    --content-width: 534px;
+}
+
 body {
     /* font-family: Arial, sans-serif;  */ /* Tidigare */
     font-family: "Open Sans", Arial, sans-serif;
@@ -94,14 +99,39 @@ form button:disabled:hover {
 /* Shared by every settings panel, so a new one cannot fall back to the
    browser's default fieldset look. */
 .settings-panel {
-    margin-top: 0.75rem;
+    /* border-box so the declared width is the width on screen, which lets the
+       panels and the text above them share one column variable. */
+    box-sizing: border-box;
+    margin: 0.75rem auto 0.9rem auto;
     padding: 0.85rem 1rem;
     border: 1px solid #ddd;
     border-radius: 6px;
     /* background-color: #f9f9f9; */ /* Tidigare */
     background-color: #fafafa;
-    max-width: 500px;
-    margin-bottom: 0.9rem;
+    max-width: var(--content-width);
+}
+
+/* === Gemensam innehållsspalt ===
+   The panels used to sit against the left padding of the card with whatever
+   space was left over on the right, so the two gaps did not match. Everything
+   inside the card now shares one centred column of the same width, which makes
+   the gaps equal and puts the headings in line with the panels' left edge. */
+#wrapper > h1,
+#wrapper > h3,
+#wrapper > header,
+#wrapper > p,
+#wrapper > div {
+    max-width: var(--content-width);
+    margin-left: auto;
+    margin-right: auto;
+}
+
+/* The button is only as wide as its label, so auto margins would centre it
+   rather than line it up. Offset it by half the leftover space instead. */
+#wrapper > button {
+    display: block;
+    margin-left: max(0px, calc((100% - var(--content-width)) / 2));
+    margin-right: auto;
 }
 
 /* === Val av hur den transkriberade texten presenteras === */
