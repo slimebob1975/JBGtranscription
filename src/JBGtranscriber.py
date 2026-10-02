@@ -586,26 +586,6 @@ class JBGtranscriber():
         cache_file = Path("cache") / f"{file_hash}.txt"
         return cache_file
     
-    def call_openai_simple(self, prompt):
-        """Anropar OpenAI:s GPT-modell med en given prompt."""
-        # TODO: Consider adding reasoning_effort='none' for gpt-5.1 to get GPT-5.1-level intelligence with ultra-low latency.
-        
-        client = openai.OpenAI(api_key=self.api_key)
-
-        extra_args = JBGtranscriber.get_model_specific_extra_arguments(self.openai_model)
-
-        completion = client.chat.completions.create(
-            model= self.openai_model,
-            messages=[
-                {"role": "developer", "content": "Du är en expert på transkriberingar av ljudfiler från exempelvis intervjuer."},
-                {"role": "user", "content": prompt},
-            ],
-            temperature = JBGtranscriber.get_permitted_temperature(self.openai_model, DEFAULT_TEMPERATURE),
-            **extra_args,
-        )
-
-        return completion.choices[0].message
-    
     @staticmethod
     def _is_unsupported_parameter_error(error):
         """True if the API rejected a parameter rather than the request itself."""

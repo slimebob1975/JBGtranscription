@@ -1,7 +1,6 @@
 # Backlog - JBGTransciption
 
 ## Known issues
-- [ ] `call_openai_simple` is no longer used by anything and could be removed.
 
 ## Planned improvments
 - [ ] Consider summarising the marked-up text rather than the original when
@@ -44,12 +43,6 @@
       "Intervjuperson 1 verkar orolig för att rutinerna inte fungerar". The
       transcript does not support inferences about a person's state of mind,
       and the subjects are identifiable staff in a supervisory file.
-- [ ] Remove the participant labels from the Fråga–svar summary, so that saying
-      *who* spoke belongs to speaker identification alone and saying *what* was
-      said belongs to the summary. Answers that differ in substance should still
-      be rendered as separate "Svar" blocks, with the prose carrying the fact
-      that several views were expressed, so that information is not lost with
-      the labels.
 - [ ] Make `start_local_service` configure itself on first run: detect the
       installed Python versions and offer them as a numbered list, and suggest
       a temporary directory and a dev root. Save the answers and reuse them on
@@ -63,6 +56,11 @@
       segment count is predictable from the transcription length.
 
 ## Solved
+- [x] Remove the participant labels from the Fråga–svar summary, so that saying
+      who spoke belongs to speaker identification and saying what was said
+      belongs to the summary
+- [x] Remove `call_openai_simple`, which nothing had called since the analyses
+      were given token budgets
 - [x] Give the card one centred content column, so the grey panels have the same
       gap on both sides and the headings line up with their left edge
 - [x] Correct the GUI tooltips: several described behaviour that had since
