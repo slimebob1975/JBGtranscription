@@ -18,16 +18,19 @@
         </header>
         
         <!-- File selector -->
-        <input type="file" id="audioFile" accept=".mp3,audio/mpeg" title="Ladda upp .mp3-fil">
-        <label>
-            <input type="checkbox" id="enableEncryption" title="Tillser att din ljudfil inte sparas okrypterad" checked>
-            Använd kryptering (rekommenderas)
-        </label>
+        <fieldset class="settings-panel" id="upload-options">
+            <legend><h4>Ladda upp din ljudfil</h4></legend>
+            <input type="file" id="audioFile" accept=".mp3,audio/mpeg" title="Ladda upp .mp3-fil">
+            <label>
+                <input type="checkbox" id="enableEncryption" title="Ljudfilen och det färdiga dokumentet sparas krypterade på servern" checked>
+                Använd kryptering (rekommenderas)
+            </label>
+        </fieldset>
 
         <!-- Transcription settings -->
         <fieldset class="settings-panel" id="transcription-options">
             <legend><h4>Inställningar för transkriberingen</h4></legend>
-            <label for="accuracySelect" title="Högre noggrannhet ger färre fel men tar längre tid och kräver mer minne">Välj noggrannhet:</label><br>
+            <label for="accuracySelect" title="Högre noggrannhet ger färre fel men tar längre tid. Räcker inte minnet används närmast mindre modell, vilket framgår av dokumentet">Välj noggrannhet:</label><br>
             <select id="accuracySelect" style="width: 100%; max-width: 400px;">
                 <option value="mycket_hog">mycket hög</option>
                 <option value="hog">hög</option>
@@ -38,11 +41,11 @@
             <label>Ange hur du vill ha den transkriberade texten:</label>
             <div class="transcription-format-choice">
                 <label><input type="radio" name="transcriptionFormat" value="raw" checked
-                       title="Den transkriberade texten som den är, utan tidsstämplar eller markeringar"> Rå text</label>
+                       title="Enbart den transkriberade texten, utan tidsstämplar eller markeringar"> Rå text</label>
                 <label><input type="radio" name="transcriptionFormat" value="timestamps"
-                       title="Texten uppdelad i avsnitt med tidsstämplar"> Med tidsstämplar</label>
+                       title="Hela texten med tidsstämplar i stället för löpande text"> Med tidsstämplar</label>
                 <label><input type="radio" name="transcriptionFormat" value="marked"
-                       title="Misstänkta transkriberingsfel markeras mellan taggarna [FEL?] och [/FEL?]"> Med markering av misstänkta fel</label>
+                       title="Hela texten med misstänkta transkriberingsfel gulmarkerade och förslag på rättelse inom (Kanske: ...). Kräver API-nyckel"> Med markering av misstänkta fel</label>
             </div>
         </fieldset>
 
@@ -60,7 +63,7 @@
                 <option value="gpt-5.1">gpt-5.1</option>
             </select>
             <label>Ange vilken textanalys du vill göra:</label><br>
-            <label><input type="checkbox" id="optSummary" title="Genererar en sammanfattning i stil med Chat-GPT"> Generera sammanfattning</label>
+            <label><input type="checkbox" id="optSummary" title="Skapar en sammanfattning av den transkriberade texten. Du väljer typ nedan och kan ändra instruktionen"> Generera sammanfattning</label>
             <div id="summaryOptions" class="summary-options" hidden>
                 <div class="summary-style-choice">
                     <label for="summaryStyle">Typ av sammanfattning:</label>
@@ -72,7 +75,7 @@
                 </div>
             </div>
             <label><input type="checkbox" id="optQuestions" title="Genererar förslag på uppföljningsfrågor baserat på den transkriberade texten"> Föreslå följdfrågor baserat på innehållet</label><br>
-            <label><input type="checkbox" id="optSpeakers" title="Försöker dela upp texten mellan olika talare baserat på ordförråd, etc."> Identifiera olika talare baserat på innehåll (beta)</label>
+            <label><input type="checkbox" id="optSpeakers" title="Återger hela texten med talarbeteckningar och listar de identifierade talarna sist. Beteckningarna bygger på ordval och sammanhang och kan bli fel"> Identifiera olika talare baserat på innehåll (beta)</label>
         </fieldset>
         
         <!-- Display button for uploading file -->
@@ -99,7 +102,7 @@
             <p id="summaryEditorSubtitle" class="summary-editor-subtitle"></p>
         </div>
         <textarea id="summaryPrompt" spellcheck="true"
-                  title="Instruktionen som skickas till språkmodellen tillsammans med transkriberingen"></textarea>
+                  title="Den instruktion som styr sammanfattningen. Ändra texten om du vill ha något annat än standardtexten"></textarea>
         <div class="summary-editor-actions">
             <button type="button" id="resetSummaryPrompt" class="link-button" hidden>Återgå till standardtexten</button>
             <span class="summary-editor-spacer"></span>

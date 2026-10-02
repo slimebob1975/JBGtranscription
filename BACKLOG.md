@@ -4,6 +4,26 @@
 - [ ] `call_openai_simple` is no longer used by anything and could be removed.
 
 ## Planned improvments
+- [ ] Consider summarising the marked-up text rather than the original when
+      "Med markering av misstänkta fel" is chosen, so the summary works from the
+      corrected reading instead of the suspected mistranscription. Marking
+      already runs before the summary, so the text is available. Two things to
+      settle first:
+      - The prompts are not hidden: what is in `policy/prompt_policy.json` is
+        what the model receives, apart from the map and reduce instructions the
+        code appends when a transcription has to be split. An instruction about
+        `[FEL?]` markers should therefore be appended by the code only when the
+        marked text is actually being summarised, so the other summary types do
+        not carry a rule about markers that are not there. Wording along the
+        lines of: the text may contain `[FEL?]...[/FEL?]` around a suspected
+        mistranscription followed by `(Kanske: ...)` with a suggested reading;
+        use whichever reading is most plausible and do not reproduce the
+        markers.
+      - The suggestions inside the markers are the model's own guesses, which
+        nobody has reviewed. Summarising them means a second model builds on a
+        first model's corrections. For a supervisory file that may argue for
+        keeping the original as the summary input, or for making it a choice
+        rather than automatic.
 - [ ] Improve speaker identification, which is still marked as beta, rather than
       retiring it now that the Fråga–Svar summary covers part of the same ground.
       Fråga–Svar rewrites the text and assumes an interview structure; speaker
@@ -43,6 +63,9 @@
       segment count is predictable from the transcription length.
 
 ## Solved
+- [x] Correct the GUI tooltips: several described behaviour that had since
+      changed, most of all the marked-errors option, which promised `[FEL?]`
+      tags that the document renderer turns into highlighting
 - [x] Check that a rewriting step gave the whole text back, by comparing word
       counts, instead of trusting the model to follow the instruction
 - [x] Move "Om transkriberingen" to the end of the document and add a "Statistik"
