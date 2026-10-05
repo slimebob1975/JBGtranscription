@@ -114,6 +114,17 @@ TRANSCRIPTION_ACCURACY_LABELS = {
 # materially shorter than its input means text was dropped, which no amount of
 # prompt wording can rule out. Below the warning level it is reported; below
 # the failure level the result is not trusted at all.
+# Measured: a model reliably echoes back a transcription of around 5,000 tokens
+# but gives up on 12,000, returning an excerpt instead. The output limit alone
+# therefore allows segments that are too large in practice, so rewriting work
+# gets a second, smaller cap. Override with JBG_REWRITE_SEGMENT_TOKENS.
+DEFAULT_REWRITE_SEGMENT_TOKENS = 6000
+
+# If the answer still comes back short, the segment size is cut and the step
+# tried again rather than discarded outright.
+MAX_REWRITE_RETRIES = 2
+REWRITE_RETRY_DIVISOR = 3
+
 REWRITE_MIN_WORD_RATIO_WARN = 0.90
 REWRITE_MIN_WORD_RATIO_FAIL = 0.70
 
@@ -928,10 +939,34 @@ class JBGtranscriber():
         overlap would duplicate text.
         """
         enc = self._get_encoder_for_segmentation()
-        budget = self._rewrite_segment_budget(instructions, enc)
-        segments = self._split_into_segments(text, enc, max_tokens=budget, overlap_sentences=0)
         max_output = self._resolve_output_token_limit()
+        budget = min(
+            self._rewrite_segment_budget(instructions, enc),
+            self._resolve_rewrite_segment_tokens(),
+        )
 
+        for attempt in range(MAX_REWRITE_RETRIES + 1):
+            result = self._rewrite_pass(instructions, text, task_name, enc, budget, max_output)
+            if self._rewrite_kept_the_text(task_name, text, result):
+                return result
+
+            smaller = max(MIN_MAX_INPUT_TOKENS, budget // REWRITE_RETRY_DIVISOR)
+            if attempt >= MAX_REWRITE_RETRIES or smaller >= budget:
+                logger.error(
+                    f"{task_name}: gav fortfarande ofullständig text. Steget används inte."
+                )
+                return ""
+
+            budget = smaller
+            logger.warning(
+                f"{task_name}: försöker igen med mindre segment ({budget} tokens)."
+            )
+
+        return ""
+
+    def _rewrite_pass(self, instructions, text, task_name, enc, budget, max_output):
+        """One pass over the text at a given segment size."""
+        segments = self._split_into_segments(text, enc, max_tokens=budget, overlap_sentences=0)
         logger.info(f"{task_name}: {len(segments)} segment (budget {budget} tokens).")
 
         parts, truncated_segments = [], 0
@@ -954,8 +989,19 @@ class JBGtranscriber():
                 "av modellens svarslängd. Resultatet kan sakna text."
             )
 
-        result = "\n\n".join(part for part in parts if part)
-        return result if self._rewrite_kept_the_text(task_name, text, result) else ""
+        return "\n\n".join(part for part in parts if part)
+
+    def _resolve_rewrite_segment_tokens(self):
+        """Practical ceiling on how much text to ask a model to echo back."""
+        override = os.getenv("JBG_REWRITE_SEGMENT_TOKENS")
+        if override:
+            try:
+                return max(MIN_MAX_INPUT_TOKENS, int(override))
+            except ValueError:
+                logger.warning(
+                    f"Ignoring invalid JBG_REWRITE_SEGMENT_TOKENS value: {override!r}"
+                )
+        return DEFAULT_REWRITE_SEGMENT_TOKENS
 
     def _rewrite_kept_the_text(self, task_name, original, result):
         """Check that a rewriting step gave the whole text back.

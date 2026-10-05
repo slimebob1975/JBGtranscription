@@ -204,6 +204,36 @@ file in clear text - plainly at odds with encrypting the result at rest. Set
 `JBG_LOG_HTTP=1` to allow it back while debugging the API itself; the log then
 says so on the first line.
 
+### Starting the service locally
+
+`start_local_service_template.ps1` no longer has a CONFIG block to edit. The
+first run asks four questions and saves the answers:
+
+- **Which Python to use.** The script looks for interpreters through the Python
+  launcher (`py -0p`), the registry, the usual installation folders and `PATH`,
+  then lists what it found with version numbers. Microsoft Store stubs and
+  interpreters belonging to a virtual environment are left out, and anything
+  older than 3.10 is marked as not recommended.
+- **The code directory.** Suggested from the script's own location, and checked
+  for `main.py`.
+- **The directory for the virtual environment.** Suggested under
+  `%LOCALAPPDATA%\JBGtranscription\runtime`, and created if missing.
+- **The port**, defaulting to 8080.
+
+Answers are stored in `%LOCALAPPDATA%\JBGtranscription\start_local_service.json`,
+outside the repository, so the file is never committed and each user keeps their
+own. Later runs read it and start without asking.
+
+| Switch | Effect |
+| --- | --- |
+| `-Reinstall` (also `--reinstall`) | Ask the questions again and overwrite the saved answers |
+| `-ShowConfig` | Print where the settings live and what they say, without starting |
+| `-ConfigFile <path>` | Use a different settings file |
+
+If the saved settings stop being valid - Python uninstalled, the code moved -
+the script says which value is wrong and runs the configuration again rather
+than failing with a path error.
+
 ### Transcription accuracy
 
 The Whisper model used to be the largest that fits in the available RAM. The
@@ -255,6 +285,12 @@ Marking suspected errors and identifying speakers both ask the model to give
 the whole transcription back, changed. Nothing in the API enforces that: the
 model may answer with only the passages it marked, which would quietly replace
 the transcription in the document with an excerpt of it.
+
+Segment size matters here, and the output limit alone is not a good guide to
+it: a model will echo back a transcription of around 5,000 tokens but give up
+on 12,000 and answer with an excerpt. Rewriting work therefore has a second,
+smaller cap of 6,000 tokens per segment, which `JBG_REWRITE_SEGMENT_TOKENS`
+overrides.
 
 The result is therefore compared with its input by word count. A rewrite
 normally comes back slightly longer, since labels and markers add words. Below

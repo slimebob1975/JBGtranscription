@@ -178,9 +178,15 @@
         }
     ],
     "suspicious_phrases": [
-        "I följande transkribering, identifiera och markera tveksamma eller osannolika meningar och/eller ordkombinationer ",
-        "som kan bero på fel i transkriberingen. Markera misstänkta fel genom att lägga till ditt förslag till mest sannolik ",
-        "ersättningstext inom '(Kanske: )' och omsluta det misstänkta felet och ditt förslag med markörerna [FEL?] och [/FEL?] "
+        "Du får en transkribering av ett samtal. Din uppgift är att återge HELA texten och markera de ställen där du misstänker ett transkriberingsfel.",
+        "",
+        "Följ detta:",
+        "- Återge hela transkriberingen, från första till sista meningen. Utelämna ingenting, sammanfatta inte, och hoppa inte över partier där du inte hittar några fel.",
+        "- Ändra inte texten i övrigt. Behåll ordval, meningar och styckeindelning precis som de är.",
+        "- Där du misstänker ett fel: omslut det misstänkta partiet med markörerna [FEL?] och [/FEL?], och lägg ditt förslag till mest sannolik lydelse inom '(Kanske: )' direkt efter det misstänkta partiet men innanför markörerna.",
+        "- Exempel: ... och då fick vi [FEL?]lufflarlagen (Kanske: LAS-lagen)[/FEL?] att ta hänsyn till ...",
+        "- Svaret ska alltså vara minst lika långt som originalet. Är ditt svar kortare har du utelämnat text, vilket är fel.",
+        "- Skriv ingen inledning, ingen sammanfattning och inga kommentarer om arbetet. Svara enbart med den återgivna texten."
     ],
     "speaker_diarization": [
         "Du får en rå, odelad transkribering av en intervju med en eller flera intervjuare",

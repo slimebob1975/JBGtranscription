@@ -1,6 +1,15 @@
 # Backlog - JBGTransciption
 
 ## Known issues
+- [ ] Speaker identification splits voices inconsistently. Three runs of the
+      same recording, each in a single call, found 7, 6 and 6 speakers, with
+      four separate "Intervjuare" in one of them. The register is not involved,
+      so this is the diarization prompt over-splitting. Keep "(beta)" until it
+      is stable.
+- [ ] The register has still not been exercised across a segment boundary. A
+      recording long enough to split is needed, or `JBG_MAX_OUTPUT_TOKENS` set
+      before the server starts - editing `.env` while uvicorn is running has no
+      effect, since `--reload` watches Python files only.
 
 ## Planned improvments
 - [ ] Consider summarising the marked-up text rather than the original when
@@ -43,10 +52,6 @@
       "Intervjuperson 1 verkar orolig för att rutinerna inte fungerar". The
       transcript does not support inferences about a person's state of mind,
       and the subjects are identifiable staff in a supervisory file.
-- [ ] Make `start_local_service` configure itself on first run: detect the
-      installed Python versions and offer them as a numbered list, and suggest
-      a temporary directory and a dev root. Save the answers and reuse them on
-      later starts. Add a `--reinstall` flag to run the configuration again.
 - [ ] Let the user edit the instructions for the other analyses too
       (suspected errors, follow-up questions, speaker identification), reusing
       the summary prompt editor.
@@ -56,6 +61,14 @@
       segment count is predictable from the transcription length.
 
 ## Solved
+- [x] Make marking of suspected errors return the whole text. The prompt asked
+      the model to mark the text but never to return all of it, and on an 8,700
+      word interview it answered with 23% of it. Rewriting work now also has a
+      practical segment cap, and a short answer makes the step retry with
+      smaller segments instead of being discarded
+- [x] Make `start_local_service` configure itself on first run: it finds the
+      installed Python versions, suggests the code and work directories, saves
+      the answers, and re-asks with `-Reinstall`
 - [x] Remove the participant labels from the Fråga–svar summary, so that saying
       who spoke belongs to speaker identification and saying what was said
       belongs to the summary
