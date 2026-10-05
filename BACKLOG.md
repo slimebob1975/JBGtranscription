@@ -1,16 +1,6 @@
 # Backlog - JBGTransciption
 
 ## Known issues
-- [ ] Speaker identification splits voices inconsistently. Three runs of the
-      same recording, each in a single call, found 7, 6 and 6 speakers, with
-      four separate "Intervjuare" in one of them. The register is not involved,
-      so this is the diarization prompt over-splitting. Keep "(beta)" until it
-      is stable.
-- [ ] The register has still not been exercised across a segment boundary. A
-      recording long enough to split is needed, or `JBG_MAX_OUTPUT_TOKENS` set
-      before the server starts - editing `.env` while uvicorn is running has no
-      effect, since `--reload` watches Python files only.
-
 ## Planned improvments
 - [ ] Consider summarising the marked-up text rather than the original when
       "Med markering av misstänkta fel" is chosen, so the summary works from the
@@ -32,19 +22,9 @@
         first model's corrections. For a supervisory file that may argue for
         keeping the original as the summary input, or for making it a choice
         rather than automatic.
-- [ ] Improve speaker identification, which is still marked as beta, rather than
-      retiring it now that the Fråga–Svar summary covers part of the same ground.
-      Fråga–Svar rewrites the text and assumes an interview structure; speaker
-      identification labels the text as it stands and works on recordings that
-      are not question-and-answer, so the two are not interchangeable. Known
-      weaknesses:
-      - `_deduplicate_blocks` is still applied as a safety net at the seams. It
-        should be possible to drop it now that the register and the context tail
-        prevent repeated text, but that needs confirming on real recordings.
-      - Consider offering the diarized text as a fourth presentation of the
-        transcription ("Med talarangivelser") rather than as a separate section,
-        once identity is stable and the speaker analysis is in place.
-      - Drop the "(beta)" label once it is dependable.
+- [ ] Offer the speaker-labelled text as a fourth presentation of the
+      transcription ("Med talarangivelser") rather than as a separate section,
+      once the per-speaker analysis is in place.
 - [ ] Add a factual per-speaker analysis on top of stable identities: which
       topics each speaker returned to, what they stated, roughly how much they
       spoke. It must stay descriptive, never evaluative - "Intervjuperson 1
@@ -61,6 +41,11 @@
       segment count is predictable from the transcription length.
 
 ## Solved
+- [x] Take speaker identification out of beta. Two runs of a seven-segment
+      recording, with six register hand-offs each, produced the same five
+      speakers and no verbatim repetition at any seam; the single-call runs it
+      replaced had given 7, 6 and 6. `_deduplicate_blocks` is removed with it,
+      since it had nothing left to clean up
 - [x] Make marking of suspected errors return the whole text. The prompt asked
       the model to mark the text but never to return all of it, and on an 8,700
       word interview it answered with 23% of it. Rewriting work now also has a

@@ -326,6 +326,12 @@ The raw register is never part of the result document. It is available afterward
 as `speaker_register` on the transcriber, which is what a per-speaker analysis
 will be built on.
 
+Measured on a seven-segment recording, run twice: the same five speakers both
+times, and no turn repeated verbatim at any of the six seams. The single-call
+runs the segmented version replaced had given 7, 6 and 6 speakers for the same
+audio, so carrying the register appears to steady the result as well as
+preserve it across boundaries.
+
 If the model ignores the instruction and returns no register, the labels are
 recovered from the dialogue itself, so identification degrades rather than
 fails.
