@@ -423,6 +423,7 @@ async function uploadFile() {
     document.getElementById("summaryStyle").disabled = true;
     document.querySelectorAll('input[name="transcriptionFormat"]').forEach(rb => rb.disabled = true);
     document.getElementById("accuracySelect").disabled = true;
+    document.getElementById("fastEngine").disabled = true;
     document.getElementById("optQuestions").disabled = true;
     document.getElementById("optSpeakers").disabled = true;
     document.getElementById("button").disabled = true;
@@ -477,6 +478,7 @@ async function uploadFile() {
         summarizeChecked ? document.getElementById("summaryPrompt").value.trim() : ""
     );
     formData.append("transcription_accuracy", document.getElementById("accuracySelect").value);
+    formData.append("fast_engine", document.getElementById("fastEngine").checked);
     formData.append(
         "transcription_format",
         document.querySelector('input[name="transcriptionFormat"]:checked')?.value || "raw"

@@ -17,6 +17,8 @@ from src.JBGtranscriber import (
     DEFAULT_TRANSCRIPTION_FORMAT,
     TRANSCRIPTION_ACCURACY_LEVELS,
     DEFAULT_TRANSCRIPTION_ACCURACY,
+    ENGINE_FASTER_WHISPER,
+    ENGINE_TRANSFORMERS,
 )
 from src.JBGSecureFileHandler import SecureFileHandler
 from pathlib import Path
@@ -125,6 +127,7 @@ def transcribe_audio(
     summary_prompt: str,
     transcription_format: str,
     transcription_accuracy: str,
+    transcription_engine: str,
     questions: bool,
     speakers: bool,
 ):
@@ -168,6 +171,7 @@ def transcribe_audio(
             summary_prompt=summary_prompt,
             transcription_format=transcription_format,
             transcription_accuracy=transcription_accuracy,
+            transcription_engine=transcription_engine,
             suggest_follow_up_questions=questions,
             analyze_speakers=speakers,
             progress_callback=progress_callback,
@@ -261,6 +265,7 @@ async def upload_audio(
     summary_prompt: str = Form(""),
     transcription_format: str = Form(""),
     transcription_accuracy: str = Form(""),
+    fast_engine: bool = Form(True),
     suspicious: bool = Form(False),   # retired; accepted as a synonym below
     questions: bool = Form(False),
     speakers: bool = Form(False)
@@ -308,6 +313,10 @@ async def upload_audio(
     if transcription_accuracy not in TRANSCRIPTION_ACCURACY_LEVELS:
         raise HTTPException(status_code=400, detail="Invalid transcription accuracy.")
 
+    # The GUI offers this as a checkbox rather than as two engine names, since
+    # the choice is between the same models run two different ways.
+    transcription_engine = ENGINE_FASTER_WHISPER if fast_engine else ENGINE_TRANSFORMERS
+
     summary_prompt = (summary_prompt or "").strip()
     if len(summary_prompt) > MAX_SUMMARY_PROMPT_CHARS:
         raise HTTPException(
@@ -326,7 +335,7 @@ async def upload_audio(
           OpenAI model of choice: {model}\n
           OpenAI API tasks: \n
           \tSummary: {summarize} ({summary_style}, {summary_prompt_source}, {len(summary_prompt)} tecken)\n
-          \tTranscription format: {transcription_format} \n          \tTranscription accuracy: {transcription_accuracy} \n
+          \tTranscription format: {transcription_format} \n          \tTranscription accuracy: {transcription_accuracy} \n          \tTranscription engine: {transcription_engine} \n
           \tGenerate questions: {questions} \n 
           \tSpeaker detection: {speakers}
           """)
@@ -367,6 +376,7 @@ async def upload_audio(
         summary_prompt,
         transcription_format,
         transcription_accuracy,
+        transcription_engine,
         questions,
         speakers
     )

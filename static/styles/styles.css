@@ -134,6 +134,28 @@ form button:disabled:hover {
     margin-right: auto;
 }
 
+/* === Noggrannhet och motorval på samma rad === */
+.accuracy-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.7rem;
+}
+
+.accuracy-row #accuracySelect {
+    flex: 0 1 auto;
+    width: auto;
+    min-width: 11rem;
+    margin-bottom: 0;
+}
+
+#fastEngineLabel {
+    font-size: 0.9rem;
+    color: #333;
+    white-space: nowrap;
+}
+
 /* === Val av hur den transkriberade texten presenteras === */
 .transcription-format-choice {
     margin: 0.3rem 0 0 1.5rem;

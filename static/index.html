@@ -31,13 +31,16 @@
         <fieldset class="settings-panel" id="transcription-options">
             <legend><h4>Inställningar för transkriberingen</h4></legend>
             <label for="accuracySelect" title="Högre noggrannhet ger färre fel men tar längre tid. Räcker inte minnet används närmast mindre modell, vilket framgår av dokumentet">Välj noggrannhet:</label><br>
-            <select id="accuracySelect" style="width: 100%; max-width: 400px;">
+            <div class="accuracy-row">
+            <select id="accuracySelect">
                 <option value="mycket_hog">mycket hög</option>
                 <option value="hog">hög</option>
                 <option value="medel" selected>medel</option>
                 <option value="bas">bas</option>
                 <option value="liten">liten</option>
             </select>
+            <label id="fastEngineLabel" title="Kör samma modell genom en snabbare motor. Ungefär dubbelt så snabbt; skillnaderna mot den långsammare motorn gäller skiljetecken och utfyllnadsord, inte innehåll"><input type="checkbox" id="fastEngine" checked> Snabb variant</label>
+            </div>
             <label>Ange hur du vill ha den transkriberade texten:</label>
             <div class="transcription-format-choice">
                 <label><input type="radio" name="transcriptionFormat" value="raw" checked

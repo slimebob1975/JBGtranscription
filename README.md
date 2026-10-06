@@ -279,6 +279,33 @@ If the chosen form turns out to be unavailable - marking failed, or the model
 returned no timestamps - the document falls back to the raw text and says so,
 rather than leaving an error message where the transcription should be.
 
+### Transcription engine
+
+The same KBLab models can be run two ways. **Snabb variant**, the checkbox
+beside the accuracy dropdown, runs them through faster-whisper (CTranslate2)
+with int8 weights; unchecked, they go through Transformers as before.
+
+Measured on a ten minute recording, both engines on CPU:
+
+| Model | Transformers | faster-whisper | Gain |
+| --- | --- | --- | --- |
+| `kb-whisper-small` | 3.57x realtime | 7.26x | 2.03x |
+| `kb-whisper-large` | 0.81x realtime | 1.62x | 1.99x |
+
+The transcriptions differed by 4-6% at word level, and the differences were
+sentence boundaries, commas and dropped filler words rather than content
+words. The fast engine is therefore the default. The checkbox exists so the
+two can be compared on real recordings before the slower engine is retired;
+it is expected to disappear once there is enough evidence.
+
+`condition_on_previous_text` is off, as KBLab recommend when no prompt is
+used, which reduces hallucination at the cost of context between windows.
+
+int8 weights are roughly a third the size of the float32 ones, so the RAM
+estimate used to pick a model is scaled down for this engine. A model that
+would be skipped under Transformers may well run under faster-whisper, which
+means the accuracy ceiling reaches further on the same machine.
+
 ### Measuring transcription speed
 
 Transcription uses the sequential long-form algorithm, which is the more

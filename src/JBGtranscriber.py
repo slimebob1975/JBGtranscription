@@ -117,6 +117,27 @@ TRANSCRIPTION_ACCURACY_LABELS = {
 # but gives up on 12,000, returning an excerpt instead. The output limit alone
 # therefore allows segments that are too large in practice, so rewriting work
 # gets a second, smaller cap. Override with JBG_REWRITE_SEGMENT_TOKENS.
+# --- Transcription engine ---------------------------------------------------
+#
+# faster-whisper runs the same KBLab models through CTranslate2 with int8
+# weights. Measured on a ten minute recording, both engines on CPU:
+#
+#   kb-whisper-small   3.57x realtime -> 7.26x   (2.03x)
+#   kb-whisper-large   0.81x realtime -> 1.62x   (1.99x)
+#
+# The transcriptions differed by 4-6% at word level, and the differences were
+# sentence boundaries, commas and dropped filler words rather than content.
+# It is therefore the default, with the slower engine kept as a fallback.
+ENGINE_FASTER_WHISPER = "faster-whisper"
+ENGINE_TRANSFORMERS = "transformers"
+DEFAULT_TRANSCRIPTION_ENGINE = ENGINE_FASTER_WHISPER
+
+# int8 weights are roughly a quarter the size of the float32 ones, so a model
+# that does not fit under the other engine may well fit under this one.
+FASTER_WHISPER_RAM_DIVISOR = 3.0
+FASTER_WHISPER_COMPUTE_TYPE_CPU = "int8"
+FASTER_WHISPER_COMPUTE_TYPE_GPU = "float16"
+
 # --- Transcription speed, for experiments ----------------------------------
 #
 # Transformers has two long-form algorithms. Without chunk_length_s it uses the
@@ -395,6 +416,7 @@ class JBGtranscriber():
         self.transcription_format = DEFAULT_TRANSCRIPTION_FORMAT
         self.speaker_register = {}
         self.transcription_accuracy = DEFAULT_TRANSCRIPTION_ACCURACY
+        self.transcription_engine = DEFAULT_TRANSCRIPTION_ENGINE
         # Statistics only: counts and timings, never any text.
         self.model_calls = []
         self.transcription_seconds = 0.0
@@ -515,6 +537,7 @@ class JBGtranscriber():
     current_task = ""
     transcriber_model_used = ""
     transcription_accuracy = DEFAULT_TRANSCRIPTION_ACCURACY
+    transcription_engine = DEFAULT_TRANSCRIPTION_ENGINE
     speaker_register = {}
 
     def load_prompt_policy(self):
@@ -1014,6 +1037,65 @@ class JBGtranscriber():
             )
 
         return "\n\n".join(part for part in parts if part)
+
+    def _faster_whisper_compute_type(self):
+        return (FASTER_WHISPER_COMPUTE_TYPE_GPU if str(self.device).startswith("cuda")
+                else FASTER_WHISPER_COMPUTE_TYPE_CPU)
+
+    def _transcribe_with_faster_whisper(self, model_id, audio_input):
+        """Transcribe through CTranslate2, in the shape _postprocess_result expects.
+
+        The segment generator is lazy: nothing is decoded until it is consumed,
+        so the loop below is where the work actually happens.
+        """
+        from faster_whisper import WhisperModel
+
+        compute_type = self._faster_whisper_compute_type()
+        logger.info(
+            f"Använder faster-whisper ({compute_type}) på {self.device} för {model_id}."
+        )
+
+        model = WhisperModel(
+            model_id,
+            device=str(self.device).split(":")[0],
+            compute_type=compute_type,
+            download_root=str(JBGtranscriber.CACHE_DIR),
+        )
+
+        segments, info = model.transcribe(
+            audio_input,
+            language="sv",
+            # KBLab recommend this to reduce hallucinations when no prompt is used.
+            condition_on_previous_text=False,
+        )
+
+        chunks, texts = [], []
+        for segment in segments:
+            text = (segment.text or "").strip()
+            if not text:
+                continue
+            texts.append(text)
+            chunks.append({"timestamp": (segment.start, segment.end), "text": text})
+
+        logger.info(
+            f"faster-whisper: språk {info.language} "
+            f"({info.language_probability:.2f}), {len(chunks)} segment."
+        )
+        return {"text": " ".join(texts), "chunks": chunks}
+
+    def _required_ram_for(self, model_id, engine):
+        """RAM estimate for a model under a given engine.
+
+        The table is written for the float32 weights the Transformers engine
+        loads. CTranslate2 int8 weights are far smaller, so insisting on the
+        same figure would refuse models that would in fact run.
+        """
+        required = self.TRANSCRIBER_MODEL_RAM_REQUIREMENTS.get(model_id)
+        if required is None:
+            return None
+        if engine == ENGINE_FASTER_WHISPER:
+            return round(required / FASTER_WHISPER_RAM_DIVISOR, 2)
+        return required
 
     def _transcription_speed_options(self):
         """Optional chunking and batching settings, from the environment.
@@ -1645,7 +1727,7 @@ class JBGtranscriber():
         for model_id in candidates:
             try:
                 logger.info(f"Trying model: {model_id}")
-                required_ram_gb = self.TRANSCRIBER_MODEL_RAM_REQUIREMENTS.get(model_id, None)
+                required_ram_gb = self._required_ram_for(model_id, self.transcription_engine)
 
                 if required_ram_gb is None:
                     logger.warning(f"No RAM requirement configured for {model_id}, skipping.")
@@ -1667,31 +1749,36 @@ class JBGtranscriber():
                 logger.info(f"Estimated RAM requirement for model {model_id}: {required_ram_gb} GB")
 
 
-                model = AutoModelForSpeechSeq2Seq.from_pretrained(
-                    model_id, torch_dtype=self.torch_dtype, use_safetensors=True, cache_dir=JBGtranscriber.CACHE_DIR
-                )
-                model.to(self.device)
-                processor = AutoProcessor.from_pretrained(model_id)
-
-                pipe = pipeline(
-                    "automatic-speech-recognition",
-                    model=model,
-                    tokenizer=processor.tokenizer,
-                    feature_extractor=processor.feature_extractor,
-                    torch_dtype=self.torch_dtype,
-                    device=self.device,
-                )
-
-                generate_kwargs = {"task": "transcribe", "language": "sv"}
-
                 audio_input = self.audio_data if hasattr(self, "audio_data") else str(self.convert_path)
-                speed_options, speed_description = self._transcription_speed_options()
-                result = pipe(
-                    audio_input,
-                    generate_kwargs=generate_kwargs,
-                    return_timestamps=True,
-                    **speed_options
-                )
+
+                if self.transcription_engine == ENGINE_FASTER_WHISPER:
+                    speed_description = f"faster-whisper {self._faster_whisper_compute_type()}"
+                    result = self._transcribe_with_faster_whisper(model_id, audio_input)
+                else:
+                    model = AutoModelForSpeechSeq2Seq.from_pretrained(
+                        model_id, torch_dtype=self.torch_dtype, use_safetensors=True, cache_dir=JBGtranscriber.CACHE_DIR
+                    )
+                    model.to(self.device)
+                    processor = AutoProcessor.from_pretrained(model_id)
+
+                    pipe = pipeline(
+                        "automatic-speech-recognition",
+                        model=model,
+                        tokenizer=processor.tokenizer,
+                        feature_extractor=processor.feature_extractor,
+                        torch_dtype=self.torch_dtype,
+                        device=self.device,
+                    )
+
+                    generate_kwargs = {"task": "transcribe", "language": "sv"}
+
+                    speed_options, speed_description = self._transcription_speed_options()
+                    result = pipe(
+                        audio_input,
+                        generate_kwargs=generate_kwargs,
+                        return_timestamps=True,
+                        **speed_options
+                    )
 
                 self.transcription, self.transcription_w_timestamps = self._postprocess_result(result)
                 self.transcription_seconds = time.time() - transcription_started
@@ -2192,6 +2279,7 @@ class JBGtranscriber():
         summary_prompt=None,
         transcription_format=DEFAULT_TRANSCRIPTION_FORMAT,
         transcription_accuracy=DEFAULT_TRANSCRIPTION_ACCURACY,
+        transcription_engine=DEFAULT_TRANSCRIPTION_ENGINE,
         find_suspicious_phrases=None,
         suggest_follow_up_questions=False,
         analyze_speakers=False,
@@ -2208,6 +2296,11 @@ class JBGtranscriber():
         self.transcription_accuracy = (
             transcription_accuracy if transcription_accuracy in TRANSCRIPTION_ACCURACY_LEVELS
             else DEFAULT_TRANSCRIPTION_ACCURACY
+        )
+        self.transcription_engine = (
+            transcription_engine if transcription_engine in
+            (ENGINE_FASTER_WHISPER, ENGINE_TRANSFORMERS)
+            else DEFAULT_TRANSCRIPTION_ENGINE
         )
         self.transcription_format = (
             transcription_format if transcription_format in TRANSCRIPTION_FORMATS
