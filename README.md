@@ -279,6 +279,29 @@ If the chosen form turns out to be unavailable - marking failed, or the model
 returned no timestamps - the document falls back to the raw text and says so,
 rather than leaving an error message where the transcription should be.
 
+### Measuring transcription speed
+
+Transcription uses the sequential long-form algorithm, which is the more
+accurate of the two available but is serial and cannot be batched. Two
+environment variables switch to the chunked algorithm so the trade-off can be
+measured; neither is set by default, so behaviour is unchanged until they are.
+
+| Variable | Effect |
+| --- | --- |
+| `JBG_CHUNK_LENGTH_S` | Window length in seconds, e.g. `30`. Enables chunked long-form |
+| `JBG_BATCH_SIZE` | How many windows to process at a time, e.g. `8`. Needs the above |
+
+The settings used are written to the log beside the duration and word count, so
+runs can be compared:
+
+```
+Transcription successful with model: KBLab/kb-whisper-small (8 711 ord, 19 min 35 s, sekventiell, utan batchning)
+```
+
+Chunked long-form is slightly less accurate at the window boundaries, since each
+window is decoded without the preceding context. Compare against a recording
+with a known transcription rather than assuming the text is unchanged.
+
 ### Completeness of rewritten text
 
 Marking suspected errors and identifying speakers both ask the model to give
@@ -326,11 +349,14 @@ The raw register is never part of the result document. It is available afterward
 as `speaker_register` on the transcriber, which is what a per-speaker analysis
 will be built on.
 
-Measured on a seven-segment recording, run twice: the same five speakers both
-times, and no turn repeated verbatim at any of the six seams. The single-call
-runs the segmented version replaced had given 7, 6 and 6 speakers for the same
-audio, so carrying the register appears to steady the result as well as
-preserve it across boundaries.
+Segment size matters more here than for other rewriting work. The same
+recording processed in a single call reported 7, 6 and 6 speakers across three
+runs; split into seven segments of about 2,100 tokens it reported the same five
+speakers twice, with no turn repeated verbatim at any of the twelve seams.
+Carrying the register appears to steady the result, which it can only do if the
+text is actually split, so speaker identification is capped at 2,500 tokens per
+segment rather than at whatever the output limit allows.
+`JBG_DIARIZATION_SEGMENT_TOKENS` overrides that.
 
 If the model ignores the instruction and returns no register, the labels are
 recovered from the dialogue itself, so identification degrades rather than

@@ -117,7 +117,32 @@ TRANSCRIPTION_ACCURACY_LABELS = {
 # but gives up on 12,000, returning an excerpt instead. The output limit alone
 # therefore allows segments that are too large in practice, so rewriting work
 # gets a second, smaller cap. Override with JBG_REWRITE_SEGMENT_TOKENS.
+# --- Transcription speed, for experiments ----------------------------------
+#
+# Transformers has two long-form algorithms. Without chunk_length_s it uses the
+# sequential one: a sliding window where each window conditions on the previous
+# one. That is the more accurate of the two and is what runs today, but it is
+# serial by construction and cannot be batched.
+#
+# With chunk_length_s set, the windows are independent and can be processed
+# several at a time with batch_size. That is faster but slightly less accurate
+# at the window boundaries, since each window loses the preceding context.
+#
+# Both are left unset so that behaviour does not change. Set the environment
+# variables to measure the trade-off on a known recording:
+#   JBG_CHUNK_LENGTH_S=30  JBG_BATCH_SIZE=8
+JBG_CHUNK_LENGTH_S_ENV = "JBG_CHUNK_LENGTH_S"
+JBG_BATCH_SIZE_ENV     = "JBG_BATCH_SIZE"
+
 DEFAULT_REWRITE_SEGMENT_TOKENS = 6000
+
+# Speaker identification needs a smaller segment still. Measured on one
+# recording: processed in a single call it reported 7, 6 and 6 speakers across
+# three runs of the same audio; split into seven segments of about 2,100 tokens
+# it reported the same five speakers twice. Carrying the register between
+# segments appears to steady the result, so the segments are kept small enough
+# that it is actually used. Override with JBG_DIARIZATION_SEGMENT_TOKENS.
+DEFAULT_DIARIZATION_SEGMENT_TOKENS = 2500
 
 # If the answer still comes back short, the segment size is cut and the step
 # tried again rather than discarded outright.
@@ -990,17 +1015,48 @@ class JBGtranscriber():
 
         return "\n\n".join(part for part in parts if part)
 
-    def _resolve_rewrite_segment_tokens(self):
-        """Practical ceiling on how much text to ask a model to echo back."""
-        override = os.getenv("JBG_REWRITE_SEGMENT_TOKENS")
+    def _transcription_speed_options(self):
+        """Optional chunking and batching settings, from the environment.
+
+        Returns the kwargs to pass to the pipeline and a short text for the log,
+        so that a run can be matched to the settings it used.
+        """
+        options = {}
+        for env_name, key in ((JBG_CHUNK_LENGTH_S_ENV, "chunk_length_s"),
+                              (JBG_BATCH_SIZE_ENV, "batch_size")):
+            raw = os.getenv(env_name)
+            if not raw:
+                continue
+            try:
+                value = int(raw)
+            except ValueError:
+                logger.warning(f"Ignoring invalid {env_name} value: {raw!r}")
+                continue
+            if value > 0:
+                options[key] = value
+
+        if options:
+            described = ", ".join(f"{k}={v}" for k, v in options.items())
+            logger.info(f"Transkribering med {described} (sätt av miljövariabler).")
+            return options, described
+
+        return options, "sekventiell, utan batchning"
+
+    def _resolve_rewrite_segment_tokens(self,
+                                        env_name="JBG_REWRITE_SEGMENT_TOKENS",
+                                        default=None):
+        """Practical ceiling on how much text to ask a model to echo back.
+
+        The output limit alone allows segments that are too large in practice,
+        and the right size differs by task, so each one has its own ceiling.
+        """
+        override = os.getenv(env_name)
         if override:
             try:
                 return max(MIN_MAX_INPUT_TOKENS, int(override))
             except ValueError:
-                logger.warning(
-                    f"Ignoring invalid JBG_REWRITE_SEGMENT_TOKENS value: {override!r}"
-                )
-        return DEFAULT_REWRITE_SEGMENT_TOKENS
+                logger.warning(f"Ignoring invalid {env_name} value: {override!r}")
+        return default if default is not None else DEFAULT_REWRITE_SEGMENT_TOKENS
 
     def _rewrite_kept_the_text(self, task_name, original, result):
         """Check that a rewriting step gave the whole text back.
@@ -1267,7 +1323,16 @@ class JBGtranscriber():
             "speaker_diarization",
             "Försök att identifiera olika röster i följande transkribering:",
         )
-        available = self._rewrite_segment_budget(instructions, enc)
+        # Capped the same way as other rewriting work, and more tightly: the
+        # register is only useful if the text is actually split, and a whole
+        # interview in one call gave an unstable speaker count.
+        available = min(
+            self._rewrite_segment_budget(instructions, enc),
+            self._resolve_rewrite_segment_tokens(
+                env_name="JBG_DIARIZATION_SEGMENT_TOKENS",
+                default=DEFAULT_DIARIZATION_SEGMENT_TOKENS,
+            ),
+        )
 
         # No overlap: continuity is carried by the register and the context
         # tail instead, so that nothing is emitted twice.
@@ -1620,11 +1685,12 @@ class JBGtranscriber():
                 generate_kwargs = {"task": "transcribe", "language": "sv"}
 
                 audio_input = self.audio_data if hasattr(self, "audio_data") else str(self.convert_path)
+                speed_options, speed_description = self._transcription_speed_options()
                 result = pipe(
                     audio_input,
-                    #chunk_length_s=30,
                     generate_kwargs=generate_kwargs,
-                    return_timestamps=True
+                    return_timestamps=True,
+                    **speed_options
                 )
 
                 self.transcription, self.transcription_w_timestamps = self._postprocess_result(result)
@@ -1633,7 +1699,8 @@ class JBGtranscriber():
                 logger.info(
                     f" Transcription successful with model: {model_id} "
                     f"({word_count} ord, "
-                    f"{JBGtranscriber._format_duration(self.transcription_seconds)})"
+                    f"{JBGtranscriber._format_duration(self.transcription_seconds)}, "
+                    f"{speed_description})"
                 )
                 self.transcriber_model_used = model_id
                 if model_id != TRANSCRIPTION_ACCURACY_MODELS.get(self.transcription_accuracy):
