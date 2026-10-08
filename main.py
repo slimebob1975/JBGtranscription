@@ -40,7 +40,12 @@ BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 UPLOAD_FOLDER = BASE_DIR / "uploads"
 RESULTS_FOLDER = BASE_DIR / "results"
+# What the Transformers engine can use. faster-whisper decides separately, since
+# CTranslate2 can reach a GPU that a CPU-only torch build cannot see; both
+# honour JBG_DEVICE.
 DEVICE = "gpu" if torch.cuda.is_available() else "cpu"
+if os.getenv("JBG_DEVICE", "auto").strip().lower() == "cpu":
+    DEVICE = "cpu"
 UPLOAD_FOLDER.mkdir(exist_ok=True)
 os.chmod(UPLOAD_FOLDER, 0o777)
 RESULTS_FOLDER.mkdir(exist_ok=True)

@@ -128,6 +128,18 @@ TRANSCRIPTION_ACCURACY_LABELS = {
 # The transcriptions differed by 4-6% at word level, and the differences were
 # sentence boundaries, commas and dropped filler words rather than content.
 # It is therefore the default, with the slower engine kept as a fallback.
+# --- Device selection -------------------------------------------------------
+#
+# The two engines do not agree about what hardware is available, and cannot.
+# Transformers asks torch, and the pinned build is torch==2.8.0+cpu, so it
+# reports no GPU whatever the machine has. faster-whisper does not use torch at
+# all: CTranslate2 has its own CUDA runtime and can use a card that torch
+# cannot see. The device is therefore decided per engine rather than once for
+# the process.
+#
+# JBG_DEVICE forces the answer: "cpu", "gpu" or "auto" (the default).
+JBG_DEVICE_ENV = "JBG_DEVICE"
+
 ENGINE_FASTER_WHISPER = "faster-whisper"
 ENGINE_TRANSFORMERS = "transformers"
 DEFAULT_TRANSCRIPTION_ENGINE = ENGINE_FASTER_WHISPER
@@ -417,6 +429,7 @@ class JBGtranscriber():
         self.speaker_register = {}
         self.transcription_accuracy = DEFAULT_TRANSCRIPTION_ACCURACY
         self.transcription_engine = DEFAULT_TRANSCRIPTION_ENGINE
+        self.transcription_device = ""
         # Statistics only: counts and timings, never any text.
         self.model_calls = []
         self.transcription_seconds = 0.0
@@ -538,6 +551,7 @@ class JBGtranscriber():
     transcriber_model_used = ""
     transcription_accuracy = DEFAULT_TRANSCRIPTION_ACCURACY
     transcription_engine = DEFAULT_TRANSCRIPTION_ENGINE
+    transcription_device = ""
     speaker_register = {}
 
     def load_prompt_policy(self):
@@ -1038,6 +1052,52 @@ class JBGtranscriber():
 
         return "\n\n".join(part for part in parts if part)
 
+    @staticmethod
+    def _device_preference():
+        """What the operator asked for: "cpu", "gpu" or "auto"."""
+        raw = (os.getenv(JBG_DEVICE_ENV) or "auto").strip().lower()
+        if raw in ("cpu", "gpu", "auto"):
+            return raw
+        logger.warning(f"Ignoring invalid {JBG_DEVICE_ENV} value: {raw!r}. Using 'auto'.")
+        return "auto"
+
+    @staticmethod
+    def ctranslate2_gpu_count():
+        """How many CUDA devices CTranslate2 can see.
+
+        Asked of CTranslate2 rather than torch, because the two are independent:
+        a CPU-only torch build says there is no GPU even when there is one.
+        """
+        try:
+            import ctranslate2
+            return int(ctranslate2.get_cuda_device_count())
+        except Exception as e:
+            logger.debug(f"Could not ask CTranslate2 about CUDA devices: {e}")
+            return 0
+
+    def _resolve_engine_device(self, engine):
+        """Decide the device for one engine, honouring JBG_DEVICE."""
+        preference = JBGtranscriber._device_preference()
+
+        if preference == "cpu":
+            return "cpu"
+
+        if engine == ENGINE_FASTER_WHISPER:
+            available = JBGtranscriber.ctranslate2_gpu_count() > 0
+            source = "CTranslate2"
+        else:
+            available = bool(getattr(torch, "cuda", None) and torch.cuda.is_available())
+            source = "torch"
+
+        if available:
+            return "cuda"
+
+        if preference == "gpu":
+            logger.warning(
+                f"{JBG_DEVICE_ENV}=gpu men {source} ser inget CUDA-stöd. Använder CPU."
+            )
+        return "cpu"
+
     def _faster_whisper_compute_type(self):
         return (FASTER_WHISPER_COMPUTE_TYPE_GPU if str(self.device).startswith("cuda")
                 else FASTER_WHISPER_COMPUTE_TYPE_CPU)
@@ -1050,17 +1110,38 @@ class JBGtranscriber():
         """
         from faster_whisper import WhisperModel
 
-        compute_type = self._faster_whisper_compute_type()
+        device = self._resolve_engine_device(ENGINE_FASTER_WHISPER)
+        compute_type = (FASTER_WHISPER_COMPUTE_TYPE_GPU if device == "cuda"
+                        else FASTER_WHISPER_COMPUTE_TYPE_CPU)
         logger.info(
-            f"Använder faster-whisper ({compute_type}) på {self.device} för {model_id}."
+            f"Använder faster-whisper ({compute_type}) på {device} för {model_id}."
         )
 
-        model = WhisperModel(
-            model_id,
-            device=str(self.device).split(":")[0],
-            compute_type=compute_type,
-            download_root=str(JBGtranscriber.CACHE_DIR),
-        )
+        try:
+            model = WhisperModel(
+                model_id,
+                device=device,
+                compute_type=compute_type,
+                download_root=str(JBGtranscriber.CACHE_DIR),
+            )
+        except Exception as e:
+            if device != "cuda":
+                raise
+            # float16 on GPU needs cuDNN present and matching. Rather than fail
+            # the run, fall back to the CPU and say so.
+            logger.error(
+                f"Kunde inte starta faster-whisper på GPU ({e}). Faller tillbaka på CPU."
+            )
+            device = "cpu"
+            compute_type = FASTER_WHISPER_COMPUTE_TYPE_CPU
+            model = WhisperModel(
+                model_id,
+                device=device,
+                compute_type=compute_type,
+                download_root=str(JBGtranscriber.CACHE_DIR),
+            )
+
+        self.transcription_device = f"{device}/{compute_type}"
 
         segments, info = model.transcribe(
             audio_input,
@@ -1771,6 +1852,7 @@ class JBGtranscriber():
                     )
 
                     generate_kwargs = {"task": "transcribe", "language": "sv"}
+                    self.transcription_device = str(self.device)
 
                     speed_options, speed_description = self._transcription_speed_options()
                     result = pipe(
@@ -1787,7 +1869,7 @@ class JBGtranscriber():
                     f" Transcription successful with model: {model_id} "
                     f"({word_count} ord, "
                     f"{JBGtranscriber._format_duration(self.transcription_seconds)}, "
-                    f"{speed_description})"
+                    f"{speed_description}, {self.transcription_device})"
                 )
                 self.transcriber_model_used = model_id
                 if model_id != TRANSCRIPTION_ACCURACY_MODELS.get(self.transcription_accuracy):
@@ -2156,6 +2238,10 @@ class JBGtranscriber():
             return ""
 
         line = f"Vald noggrannhet: {label}. Modell som användes: {used}."
+        if self.transcription_device:
+            engine = ("faster-whisper" if self.transcription_engine == ENGINE_FASTER_WHISPER
+                      else "Transformers")
+            line += f" Motor: {engine} på {self.transcription_device}."
         if wanted and used != wanted:
             line += (
                 f" Den valda nivån motsvarar {wanted}, men tillgängligt minne "

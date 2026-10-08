@@ -279,6 +279,34 @@ If the chosen form turns out to be unavailable - marking failed, or the model
 returned no timestamps - the document falls back to the raw text and says so,
 rather than leaving an error message where the transcription should be.
 
+### Which device the transcription runs on
+
+The two engines are asked separately, because they cannot agree. Transformers
+asks torch, and `requirements.txt` pins `torch==2.8.0+cpu`, so it reports no
+GPU whatever the machine has. faster-whisper does not use torch at all:
+CTranslate2 has its own CUDA runtime and can use a card torch cannot see.
+
+On a development machine with a GPU and the pinned CPU torch build, the result
+is therefore that faster-whisper runs on the GPU and Transformers does not.
+That is correct rather than inconsistent: the CPU-only wheel genuinely cannot
+use the card.
+
+`JBG_DEVICE` overrides the choice:
+
+| Value | Effect |
+| --- | --- |
+| `auto` (default) | Use a GPU if the engine can see one |
+| `cpu` | Never use a GPU. Worth setting explicitly in production |
+| `gpu` | Prefer a GPU; warns and uses the CPU if none is visible |
+
+If the model cannot be started on the GPU - `float16` needs a matching cuDNN -
+the run falls back to the CPU and logs an error rather than failing. The device
+that was actually used is recorded in the log and under **Om transkriberingen**
+in the document.
+
+Note that the RAM check that picks a model measures *system* memory. On a GPU
+the binding constraint is VRAM instead, so the ceiling may be wrong there.
+
 ### Transcription engine
 
 The same KBLab models can be run two ways. **Snabb variant**, the checkbox
