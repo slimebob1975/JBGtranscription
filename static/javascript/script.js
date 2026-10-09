@@ -515,6 +515,26 @@ async function uploadFile() {
     }
 }
 
+// Turns a failed download into something that can be acted on without opening
+// the developer console, which is the only place the status was visible before.
+function describeDownloadFailure(error) {
+    const status = error && error.status;
+    if (!status) {
+        // No response at all: the request never completed.
+        return " (ingen kontakt med servern).";
+    }
+    const reasons = {
+        400: "nyckeln för kryptering saknades",
+        404: "resultatfilen hittades inte på servern",
+        500: "servern kunde inte läsa resultatfilen",
+        502: "servern svarade inte i tid",
+        503: "tjänsten var inte tillgänglig",
+        504: "servern svarade inte i tid",
+    };
+    const reason = reasons[status];
+    return reason ? ` (${status}: ${reason}).` : ` (statuskod ${status}).`;
+}
+
 async function downloadResult(file_id, filename) {
     const formData = new FormData();
     formData.append("encryption_key", globalEncryptionKeyBase64 || "");
@@ -526,7 +546,11 @@ async function downloadResult(file_id, filename) {
 
     if (!response.ok) {
         const text = await response.text().catch(() => "");
-        throw new Error(`Nedladdningen misslyckades (${response.status}): ${text}`);
+        const error = new Error(`Nedladdningen misslyckades (${response.status}): ${text}`);
+        // Kept separately so the status can be shown in the GUI without the
+        // body, which may contain details that do not belong on screen.
+        error.status = response.status;
+        throw error;
     }
 
     // The server decrypts encrypted results only in memory and streams the DOCX.
@@ -627,7 +651,9 @@ async function checkStatus(file_id) {
                 } catch (e) {
                     console.error("Fel vid automatisk nedladdning:", e);
                     document.getElementById("status").innerText =
-                        "Resultatet är klart, men den automatiska nedladdningen misslyckades. Ladda om sidan och försök igen innan serverfilen städas bort.";
+                        "Resultatet är klart, men den automatiska nedladdningen misslyckades"
+                        + describeDownloadFailure(e)
+                        + " Ladda om sidan och försök igen innan serverfilen städas bort.";
                 }
                 return;
             }
