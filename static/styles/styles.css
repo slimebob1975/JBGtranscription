@@ -1,4 +1,9 @@
 /* === Grundläggande inställningar === */
+:root {
+    /* Width of the grey panels, and of the column everything else lines up to. */
+    --content-width: 534px;
+}
+
 body {
     /* font-family: Arial, sans-serif;  */ /* Tidigare */
     font-family: "Open Sans", Arial, sans-serif;
@@ -6,13 +11,13 @@ body {
     background-color: #f2f2f2;
     color: #333;
     margin: 0;
-    padding: 2rem;
+    padding: 1.25rem;
 }
 
 /* === Wrapper === */
 #wrapper {
     background-color: #fff;
-    padding: 2rem;
+    padding: 1.5rem;
     border-radius: 8px;
     /* box-shadow: 0 0 6px rgba(0,0,0,0.1); */ /* Tidigare */
     box-shadow: 0 2px 8px rgba(0,0,0,0.05);
@@ -31,12 +36,12 @@ h3 {
     font-weight: normal;
     /* color: #444; */ /* Behålls */
     color: #444;
-    margin-bottom: 1.5rem;
+    margin-bottom: 0.75rem;
 }
 
 /* === Filuppladdning === */
 input[type="file"] {
-    margin-bottom: 1rem;
+    margin-bottom: 0.5rem;
 }
 
 /* === Knappar === */
@@ -91,14 +96,77 @@ form button:disabled:hover {
 }
 
 /* === Sektion för AI-val === */
-#ai-options {
-    padding: 1rem;
+/* Shared by every settings panel, so a new one cannot fall back to the
+   browser's default fieldset look. */
+.settings-panel {
+    /* border-box so the declared width is the width on screen, which lets the
+       panels and the text above them share one column variable. */
+    box-sizing: border-box;
+    margin: 0.75rem auto 0.9rem auto;
+    padding: 0.85rem 1rem;
     border: 1px solid #ddd;
     border-radius: 6px;
     /* background-color: #f9f9f9; */ /* Tidigare */
     background-color: #fafafa;
-    max-width: 500px;
-    margin-bottom: 1.5rem;
+    max-width: var(--content-width);
+}
+
+/* === Gemensam innehållsspalt ===
+   The panels used to sit against the left padding of the card with whatever
+   space was left over on the right, so the two gaps did not match. Everything
+   inside the card now shares one centred column of the same width, which makes
+   the gaps equal and puts the headings in line with the panels' left edge. */
+#wrapper > h1,
+#wrapper > h3,
+#wrapper > header,
+#wrapper > p,
+#wrapper > div {
+    max-width: var(--content-width);
+    margin-left: auto;
+    margin-right: auto;
+}
+
+/* The button is only as wide as its label, so auto margins would centre it
+   rather than line it up. Offset it by half the leftover space instead. */
+#wrapper > button {
+    display: block;
+    margin-left: max(0px, calc((100% - var(--content-width)) / 2));
+    margin-right: auto;
+}
+
+/* === Noggrannhet och motorval på samma rad === */
+.accuracy-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.7rem;
+}
+
+.accuracy-row #accuracySelect {
+    flex: 0 1 auto;
+    width: auto;
+    min-width: 11rem;
+    margin-bottom: 0;
+}
+
+#fastEngineLabel {
+    font-size: 0.9rem;
+    color: #333;
+    white-space: nowrap;
+}
+
+/* === Val av hur den transkriberade texten presenteras === */
+.transcription-format-choice {
+    margin: 0.3rem 0 0 1.5rem;
+}
+
+.transcription-format-choice label {
+    display: block;
+    margin-bottom: 0.1rem;
+    font-size: 0.9rem;
+    color: #333;
+    white-space: nowrap;
 }
 
 /* === Redigerbar sammanfattningsinstruktion === */
@@ -342,4 +410,31 @@ form button:disabled:hover {
     display: none;
     text-align: center;
     margin-top: 20px;
+}
+
+/* === Tätare formulär ===
+   Spacing is set on the fields themselves rather than with repeated <br>
+   elements, so it can be tuned in one place. */
+.settings-panel legend h4 {
+    margin: 0;
+}
+
+.settings-panel select,
+.settings-panel input[type="password"] {
+    margin-bottom: 0.7rem;
+}
+
+.settings-panel > label {
+    display: inline-block;
+    margin-bottom: 0.15rem;
+}
+
+#summaryOptions {
+    margin-top: 0.35rem;
+    margin-bottom: 0.35rem;
+}
+
+#uploadButton,
+#wrapper > button {
+    margin-top: 0.25rem;
 }

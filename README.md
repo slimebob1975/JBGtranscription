@@ -180,6 +180,262 @@ The web interface can encrypt the uploaded audio and the generated DOCX result w
 9. After the response has finished streaming, the server deletes the stored result file.
 10. The temporary uploaded audio file is also deleted after processing.
 
+### What the result document contains
+
+In order: the transcribed text in the chosen form, then the analyses that were
+asked for, then two closing sections. **Om transkriberingen** names the Whisper
+model that actually ran, and **Statistik** is a table of what the run cost:
+
+| Moment | Modell | Anrop | Tokens in | Tokens ut | Tid |
+| --- | --- | --- | --- | --- | --- |
+
+One row per moment, plus a total. Only counts and timings are recorded, never
+any part of the text. The section is left out when no model ran.
+
+### Logging
+
+Logging is configured once per process. A log file is created under `log/` when
+the first logger is built, and every later logger writes to that same file.
+
+The transcription itself is never logged; its size in words is noted instead.
+Third-party request logging is kept at WARNING. The OpenAI client logs whole
+request bodies at DEBUG, which would put the entire transcription into the log
+file in clear text - plainly at odds with encrypting the result at rest. Set
+`JBG_LOG_HTTP=1` to allow it back while debugging the API itself; the log then
+says so on the first line.
+
+### Starting the service locally
+
+`start_local_service_template.ps1` no longer has a CONFIG block to edit. The
+first run asks four questions and saves the answers:
+
+- **Which Python to use.** The script looks for interpreters through the Python
+  launcher (`py -0p`), the registry, the usual installation folders and `PATH`,
+  then lists what it found with version numbers. Microsoft Store stubs and
+  interpreters belonging to a virtual environment are left out, and anything
+  older than 3.10 is marked as not recommended.
+- **The code directory.** Suggested from the script's own location, and checked
+  for `main.py`.
+- **The directory for the virtual environment.** Suggested under
+  `%LOCALAPPDATA%\JBGtranscription\runtime`, and created if missing.
+- **The port**, defaulting to 8080.
+
+Answers are stored in `%LOCALAPPDATA%\JBGtranscription\start_local_service.json`,
+outside the repository, so the file is never committed and each user keeps their
+own. Later runs read it and start without asking.
+
+| Switch | Effect |
+| --- | --- |
+| `-Reinstall` (also `--reinstall`) | Ask the questions again and overwrite the saved answers |
+| `-ShowConfig` | Print where the settings live and what they say, without starting |
+| `-ConfigFile <path>` | Use a different settings file |
+
+If the saved settings stop being valid - Python uninstalled, the code moved -
+the script says which value is wrong and runs the configuration again rather
+than failing with a path error.
+
+### Transcription accuracy
+
+The Whisper model used to be the largest that fits in the available RAM. The
+**Välj noggrannhet:** dropdown now sets a ceiling on that:
+
+| Option | Model |
+| --- | --- |
+| mycket hög | `KBLab/kb-whisper-large` |
+| hög | `KBLab/kb-whisper-medium` |
+| medel | `KBLab/kb-whisper-small` (default) |
+| bas | `KBLab/kb-whisper-base` |
+| liten | `KBLab/kb-whisper-tiny` |
+
+The chosen model is used exactly, or the first one below it in the list that
+fits the available RAM. The choice only decides where the search starts, so it
+is never upgraded past what was asked for: choosing `liten` deliberately for a
+quick run gives `liten`, however much memory the machine has.
+
+Because that fallback is otherwise invisible, the document records which model
+actually ran under the heading **Om transkriberingen**, and says so explicitly
+when a smaller model had to be used.
+
+The upload posts this as `transcription_accuracy`. An empty value means the
+default; an unknown one is rejected.
+
+### How the transcribed text is presented
+
+The result document contains exactly one form of the transcribed text, chosen
+with the radio group **Ange hur du vill ha den transkriberade texten**:
+
+| Option | Form | Needs an API key |
+| --- | --- | --- |
+| Rå text | The transcription as it is | No |
+| Med tidsstämplar | Segments prefixed with their timestamps | No |
+| Med markerade misstänkt fel | Suspected mistranscriptions marked between `[FEL?]` and `[/FEL?]` | Yes |
+
+The upload posts this as `transcription_format`, with the values `raw`,
+`timestamps` and `marked`. The retired `suspicious` form field is still
+accepted: `suspicious=true` is read as `marked`, so an older client keeps
+working.
+
+If the chosen form turns out to be unavailable - marking failed, or the model
+returned no timestamps - the document falls back to the raw text and says so,
+rather than leaving an error message where the transcription should be.
+
+### Running behind gunicorn
+
+`startup.sh` runs **one** worker, deliberately. Job status is held in the
+worker's own memory while the result file goes to shared disk, so with several
+workers the upload, the status polling and the download can each land in a
+different process. Each worker also loads its own Whisper model, and the work
+is CPU-bound in any case, so a second worker costs memory without adding
+throughput.
+
+The gunicorn timeout must exceed the longest transcription. A worker that has
+not reported in within `--timeout` is restarted, and a request arriving at a
+worker that is being recycled is answered by Azure's gateway with a 502. The
+previous value of 601 seconds was shorter than many real jobs: a one hour
+interview takes about 19 minutes on `medel` and 74 on `mycket hög`.
+
+The application logs to stdout as well as to `log/`, so in Azure App Service
+the log can be read live under **Log stream**, or through Kudu at
+`https://<sitename>.scm.azurewebsites.net`, without any change to the code.
+
+### Which device the transcription runs on
+
+The two engines are asked separately, because they cannot agree. Transformers
+asks torch, and `requirements.txt` pins `torch==2.8.0+cpu`, so it reports no
+GPU whatever the machine has. faster-whisper does not use torch at all:
+CTranslate2 has its own CUDA runtime and can use a card torch cannot see.
+
+On a development machine with a GPU and the pinned CPU torch build, the result
+is therefore that faster-whisper runs on the GPU and Transformers does not.
+That is correct rather than inconsistent: the CPU-only wheel genuinely cannot
+use the card.
+
+`JBG_DEVICE` overrides the choice:
+
+| Value | Effect |
+| --- | --- |
+| `auto` (default) | Use a GPU if the engine can see one |
+| `cpu` | Never use a GPU. Worth setting explicitly in production |
+| `gpu` | Prefer a GPU; warns and uses the CPU if none is visible |
+
+If the model cannot be started on the GPU - `float16` needs a matching cuDNN -
+the run falls back to the CPU and logs an error rather than failing. The device
+that was actually used is recorded in the log and under **Om transkriberingen**
+in the document.
+
+Note that the RAM check that picks a model measures *system* memory. On a GPU
+the binding constraint is VRAM instead, so the ceiling may be wrong there.
+
+### Transcription engine
+
+The same KBLab models can be run two ways. **Snabb variant**, the checkbox
+beside the accuracy dropdown, runs them through faster-whisper (CTranslate2)
+with int8 weights; unchecked, they go through Transformers as before.
+
+Measured on a ten minute recording, both engines on CPU:
+
+| Model | Transformers | faster-whisper | Gain |
+| --- | --- | --- | --- |
+| `kb-whisper-small` | 3.57x realtime | 7.26x | 2.03x |
+| `kb-whisper-large` | 0.81x realtime | 1.62x | 1.99x |
+
+The transcriptions differed by 4-6% at word level, and the differences were
+sentence boundaries, commas and dropped filler words rather than content
+words. The fast engine is therefore the default. The checkbox exists so the
+two can be compared on real recordings before the slower engine is retired;
+it is expected to disappear once there is enough evidence.
+
+`condition_on_previous_text` is off, as KBLab recommend when no prompt is
+used, which reduces hallucination at the cost of context between windows.
+
+int8 weights are roughly a third the size of the float32 ones, so the RAM
+estimate used to pick a model is scaled down for this engine. A model that
+would be skipped under Transformers may well run under faster-whisper, which
+means the accuracy ceiling reaches further on the same machine.
+
+### Measuring transcription speed
+
+Transcription uses the sequential long-form algorithm, which is the more
+accurate of the two available but is serial and cannot be batched. Two
+environment variables switch to the chunked algorithm so the trade-off can be
+measured; neither is set by default, so behaviour is unchanged until they are.
+
+| Variable | Effect |
+| --- | --- |
+| `JBG_CHUNK_LENGTH_S` | Window length in seconds, e.g. `30`. Enables chunked long-form |
+| `JBG_BATCH_SIZE` | How many windows to process at a time, e.g. `8`. Needs the above |
+
+The settings used are written to the log beside the duration and word count, so
+runs can be compared:
+
+```
+Transcription successful with model: KBLab/kb-whisper-small (8 711 ord, 19 min 35 s, sekventiell, utan batchning)
+```
+
+Chunked long-form is slightly less accurate at the window boundaries, since each
+window is decoded without the preceding context. Compare against a recording
+with a known transcription rather than assuming the text is unchanged.
+
+### Completeness of rewritten text
+
+Marking suspected errors and identifying speakers both ask the model to give
+the whole transcription back, changed. Nothing in the API enforces that: the
+model may answer with only the passages it marked, which would quietly replace
+the transcription in the document with an excerpt of it.
+
+Segment size matters here, and the output limit alone is not a good guide to
+it: a model will echo back a transcription of around 5,000 tokens but give up
+on 12,000 and answer with an excerpt. Rewriting work therefore has a second,
+smaller cap of 6,000 tokens per segment, which `JBG_REWRITE_SEGMENT_TOKENS`
+overrides.
+
+The result is therefore compared with its input by word count. A rewrite
+normally comes back slightly longer, since labels and markers add words. Below
+90% it is reported in the log; below 70% it is not used at all, and the
+document falls back to the raw text with a line saying why.
+
+### Speaker identification
+
+A long recording is labelled segment by segment, which raises a problem the
+model cannot solve on its own: each segment is processed in a separate call, so
+"Intervjuobjekt 1" in one segment need not be the same person as in the next.
+
+Each answer therefore ends with a speaker register - one line per label with a
+short factual note on how to recognise that person. The register is parsed off
+before the dialogue is kept, merged with what is already known, and given to
+the next segment, which is told to reuse those labels and introduce a new one
+only for a voice that is not in the list. The last few sentences of the
+previous segment are passed as context as well, marked as already handled, so
+a reply split across a boundary is attributed correctly without appearing
+twice.
+
+The dialogue itself contains nothing but replies: the instruction says so
+explicitly, since a description of each speaker repeated after every segment is
+not what the section is for. The speakers are instead listed once, under
+**Identifierade talare:** at the end of the section.
+
+The heading the model writes is matched loosely - with or without hashes,
+bold, colon or a different case - because a block that went unrecognised would
+otherwise be left sitting in the middle of the dialogue. If several blocks turn
+up in one answer, all of them are removed and the last is used.
+
+The raw register is never part of the result document. It is available afterwards
+as `speaker_register` on the transcriber, which is what a per-speaker analysis
+will be built on.
+
+Segment size matters more here than for other rewriting work. The same
+recording processed in a single call reported 7, 6 and 6 speakers across three
+runs; split into seven segments of about 2,100 tokens it reported the same five
+speakers twice, with no turn repeated verbatim at any of the twelve seams.
+Carrying the register appears to steady the result, which it can only do if the
+text is actually split, so speaker identification is capped at 2,500 tokens per
+segment rather than at whatever the output limit allows.
+`JBG_DIARIZATION_SEGMENT_TOKENS` overrides that.
+
+If the model ignores the instruction and returns no register, the labels are
+recovered from the dialogue itself, so identification degrades rather than
+fails.
+
 ### Editable summary instruction
 
 When **Generera sammanfattning** is ticked, the GUI reveals a dropdown of summary

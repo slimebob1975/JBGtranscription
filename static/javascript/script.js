@@ -333,18 +333,40 @@ document.addEventListener("DOMContentLoaded", () => {
         document.getElementById("apiKey").value = savedKey;
     }
 
+    const accuracySelect = document.getElementById("accuracySelect");
+    const savedAccuracy = localStorage.getItem("jbg_transcription_accuracy");
+    if (savedAccuracy && accuracySelect.querySelector(`option[value="${savedAccuracy}"]`)) {
+        accuracySelect.value = savedAccuracy;
+    }
+    accuracySelect.addEventListener("change", () => {
+        try {
+            localStorage.setItem("jbg_transcription_accuracy", accuracySelect.value);
+        } catch (err) {
+            console.warn("Kunde inte spara vald noggrannhet lokalt:", err);
+        }
+    });
+
     const apiKeyInput = document.getElementById("apiKey");
     const checkboxes = [
         document.getElementById("optSummary"),
-        document.getElementById("optSuspicious"),
         document.getElementById("optQuestions"),
         document.getElementById("optSpeakers"),
     ];
 
+    // Marking suspected errors is done by the language model, so that
+    // presentation needs an API key. Raw text and timestamps do not.
+    const markedFormatRadio = document.querySelector('input[name="transcriptionFormat"][value="marked"]');
+
     apiKeyInput.addEventListener("input", () => {
         const hasKey = apiKeyInput.value.trim().length > 0;
         checkboxes.forEach(cb => cb.disabled = !hasKey);
+        markedFormatRadio.disabled = !hasKey;
+        if (!hasKey && markedFormatRadio.checked) {
+            document.querySelector('input[name="transcriptionFormat"][value="raw"]').checked = true;
+        }
     });
+
+    markedFormatRadio.disabled = apiKeyInput.value.trim().length === 0;
 
     // Summary checkbox: reveal the style choice and the editable instruction
     const summaryCheckbox = document.getElementById("optSummary");
@@ -399,7 +421,9 @@ async function uploadFile() {
     document.getElementById("optSummary").disabled = true;
     document.getElementById("openSummaryEditor").disabled = true;
     document.getElementById("summaryStyle").disabled = true;
-    document.getElementById("optSuspicious").disabled = true;
+    document.querySelectorAll('input[name="transcriptionFormat"]').forEach(rb => rb.disabled = true);
+    document.getElementById("accuracySelect").disabled = true;
+    document.getElementById("fastEngine").disabled = true;
     document.getElementById("optQuestions").disabled = true;
     document.getElementById("optSpeakers").disabled = true;
     document.getElementById("button").disabled = true;
@@ -453,17 +477,33 @@ async function uploadFile() {
         "summary_prompt",
         summarizeChecked ? document.getElementById("summaryPrompt").value.trim() : ""
     );
-    formData.append("suspicious", document.getElementById("optSuspicious").checked);
+    formData.append("transcription_accuracy", document.getElementById("accuracySelect").value);
+    formData.append("fast_engine", document.getElementById("fastEngine").checked);
+    formData.append(
+        "transcription_format",
+        document.querySelector('input[name="transcriptionFormat"]:checked')?.value || "raw"
+    );
     formData.append("questions", document.getElementById("optQuestions").checked);
     formData.append("speakers", document.getElementById("optSpeakers").checked);
 
     fileInput.disabled = true;
 
     // Check Formdata for errors.
+    //
+    // Fälten loggas för felsökning, men innehållet får inte skrivas ut rakt av:
+    // formuläret innehåller API-nyckeln och krypteringsnyckeln, och
+    // webbläsarkonsolen sparas, klistras in i felrapporter och syns för den som
+    // sitter bredvid. Hemligheter visas därför bara med längd, och
+    // promptinstruktionen bara med teckenantal.
+    const SECRET_FIELDS = ["api_key", "encryption_key"];
+    const BULKY_FIELDS = ["summary_prompt"];
     for (const [key, value] of formData.entries()) {
-        // Om värdet är en Blob (fil), visa namn och typ
         if (value instanceof Blob) {
             console.log(`${key}: [Blob] filename=${value.name}, type=${value.type}, size=${value.size}`);
+        } else if (SECRET_FIELDS.includes(key)) {
+            console.log(`${key}: [dolt, ${String(value).length} tecken]`);
+        } else if (BULKY_FIELDS.includes(key)) {
+            console.log(`${key}: [${String(value).length} tecken]`);
         } else {
             console.log(`${key}: ${value}`);
         }
@@ -486,6 +526,26 @@ async function uploadFile() {
     }
 }
 
+// Turns a failed download into something that can be acted on without opening
+// the developer console, which is the only place the status was visible before.
+function describeDownloadFailure(error) {
+    const status = error && error.status;
+    if (!status) {
+        // No response at all: the request never completed.
+        return " (ingen kontakt med servern).";
+    }
+    const reasons = {
+        400: "nyckeln för kryptering saknades",
+        404: "resultatfilen hittades inte på servern",
+        500: "servern kunde inte läsa resultatfilen",
+        502: "servern svarade inte i tid",
+        503: "tjänsten var inte tillgänglig",
+        504: "servern svarade inte i tid",
+    };
+    const reason = reasons[status];
+    return reason ? ` (${status}: ${reason}).` : ` (statuskod ${status}).`;
+}
+
 async function downloadResult(file_id, filename) {
     const formData = new FormData();
     formData.append("encryption_key", globalEncryptionKeyBase64 || "");
@@ -497,7 +557,11 @@ async function downloadResult(file_id, filename) {
 
     if (!response.ok) {
         const text = await response.text().catch(() => "");
-        throw new Error(`Nedladdningen misslyckades (${response.status}): ${text}`);
+        const error = new Error(`Nedladdningen misslyckades (${response.status}): ${text}`);
+        // Kept separately so the status can be shown in the GUI without the
+        // body, which may contain details that do not belong on screen.
+        error.status = response.status;
+        throw error;
     }
 
     // The server decrypts encrypted results only in memory and streams the DOCX.
@@ -598,7 +662,9 @@ async function checkStatus(file_id) {
                 } catch (e) {
                     console.error("Fel vid automatisk nedladdning:", e);
                     document.getElementById("status").innerText =
-                        "Resultatet är klart, men den automatiska nedladdningen misslyckades. Ladda om sidan och försök igen innan serverfilen städas bort.";
+                        "Resultatet är klart, men den automatiska nedladdningen misslyckades"
+                        + describeDownloadFailure(e)
+                        + " Ladda om sidan och försök igen innan serverfilen städas bort.";
                 }
                 return;
             }

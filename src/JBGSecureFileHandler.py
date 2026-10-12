@@ -4,9 +4,14 @@ import secrets
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from src.JBGLogger import JBGLogger
 
+# One logger for the module, not one per instance: a new JBGLogger per handler
+# was what left the stray empty log files behind.
+logger = JBGLogger(level="INFO").logger
+
+
 class SecureFileHandler:
     def __init__(self, encryption_key: str):
-        self.logger = JBGLogger(level="INFO").logger
+        self.logger = logger
         self.key = base64.b64decode(encryption_key)  # Expect 256-bit key (32 bytes)
         self.nonce_size = 12  # AES-GCM standard
 
