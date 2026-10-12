@@ -489,10 +489,21 @@ async function uploadFile() {
     fileInput.disabled = true;
 
     // Check Formdata for errors.
+    //
+    // Fälten loggas för felsökning, men innehållet får inte skrivas ut rakt av:
+    // formuläret innehåller API-nyckeln och krypteringsnyckeln, och
+    // webbläsarkonsolen sparas, klistras in i felrapporter och syns för den som
+    // sitter bredvid. Hemligheter visas därför bara med längd, och
+    // promptinstruktionen bara med teckenantal.
+    const SECRET_FIELDS = ["api_key", "encryption_key"];
+    const BULKY_FIELDS = ["summary_prompt"];
     for (const [key, value] of formData.entries()) {
-        // Om värdet är en Blob (fil), visa namn och typ
         if (value instanceof Blob) {
             console.log(`${key}: [Blob] filename=${value.name}, type=${value.type}, size=${value.size}`);
+        } else if (SECRET_FIELDS.includes(key)) {
+            console.log(`${key}: [dolt, ${String(value).length} tecken]`);
+        } else if (BULKY_FIELDS.includes(key)) {
+            console.log(`${key}: [${String(value).length} tecken]`);
         } else {
             console.log(`${key}: ${value}`);
         }
