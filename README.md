@@ -279,6 +279,25 @@ If the chosen form turns out to be unavailable - marking failed, or the model
 returned no timestamps - the document falls back to the raw text and says so,
 rather than leaving an error message where the transcription should be.
 
+### Running behind gunicorn
+
+`startup.sh` runs **one** worker, deliberately. Job status is held in the
+worker's own memory while the result file goes to shared disk, so with several
+workers the upload, the status polling and the download can each land in a
+different process. Each worker also loads its own Whisper model, and the work
+is CPU-bound in any case, so a second worker costs memory without adding
+throughput.
+
+The gunicorn timeout must exceed the longest transcription. A worker that has
+not reported in within `--timeout` is restarted, and a request arriving at a
+worker that is being recycled is answered by Azure's gateway with a 502. The
+previous value of 601 seconds was shorter than many real jobs: a one hour
+interview takes about 19 minutes on `medel` and 74 on `mycket hög`.
+
+The application logs to stdout as well as to `log/`, so in Azure App Service
+the log can be read live under **Log stream**, or through Kudu at
+`https://<sitename>.scm.azurewebsites.net`, without any change to the code.
+
 ### Which device the transcription runs on
 
 The two engines are asked separately, because they cannot agree. Transformers
