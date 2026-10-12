@@ -9,6 +9,7 @@
   corrected reading instead of the suspected mistranscription. Marking
   already runs before the summary, so the text is available. Two things to
   settle first:
+
   - The prompts are not hidden: what is in `policy/prompt_policy.json` is
     what the model receives, apart from the map and reduce instructions the
     code appends when a transcription has to be split. An instruction about
@@ -43,6 +44,21 @@
   segment count is predictable from the transcription length.
 - [ ] Investigate if batching and moving window can improve execution time for the transcription step without big loss of accuracy
 - [ ] Investigare if a faster-Whisper model can improve execution time without big loss of accuracy
+- [ ] Accept other audio formats than mp3. .wav and .m4a turn up often in
+  practice. ffmpeg already handles them, so this is less work than it looks:
+  the restriction is that `AudioSegment.from_file` is called with
+  `format="mp3"`, that the file input accepts only `.mp3,audio/mpeg`, and that
+  the upload path hardcodes a `.mp3` suffix. Dropping the explicit format lets
+  pydub detect the container. Three things to settle at the same time:
+
+  - Validation. Accepting whatever ffmpeg can open also accepts video
+    containers. Either list the permitted formats explicitly, or decide that
+    pulling the audio out of an .mp4 is a feature rather than a mistake.
+  - File size. A 68 minute interview is about 95 MB as mp3 and roughly 700 MB
+    as 16-bit wav. That has to pass through the upload, the encryption step and
+    the instance's scratch space, on a plan with 7.71 GB of memory.
+  - The filename suffix used for the upload and for the result document, which
+    currently assumes mp3.
 
 ## Solved
 
