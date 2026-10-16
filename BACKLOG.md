@@ -2,6 +2,40 @@
 
 ## Known issues
 
+- [ ] Uploaded audio and finished results can stay on the server indefinitely.
+  Deletion is event-driven only: the upload is removed when
+  `transcribe_audio` finishes, and the result when its download has finished
+  streaming. Nothing sweeps `uploads/` or `results/` on a timer, at startup or
+  by age, so three cases leave files behind:
+
+  - Setup fails. The `JBGtranscriber` constructor and
+    `decrypt_file_to_memory` run before the `try` in `transcribe_audio`, so
+    an exception there skips both cleanup calls. The job is also never
+    marked done, and the client keeps polling.
+  - The process dies mid-job. A Gunicorn timeout, an instance restart or a
+    redeploy ends the background task before it reaches cleanup.
+  - The result is never downloaded. Closing the tab or a failed download
+    leaves the result in place, and with encryption off it is a readable
+    DOCX.
+
+  Planned fix, in three parts:
+
+  - Move the constructor and the decryption inside the `try`, so a failure
+    there deletes the upload and reports the error like any other.
+  - Empty `uploads/` at startup. With one worker no job survives a restart,
+    so anything there is orphaned. `results/` is left alone, since a
+    finished result can still be downloaded after a restart through
+    `find_result_path`.
+  - Delete files in both folders older than a configurable age, for example
+    `JBG_RETENTION_HOURS`, checked periodically. The age must exceed the
+    Gunicorn timeout of two hours, or an upload could be deleted while it is
+    still being transcribed, and leave a reasonable window for the download.
+    The same sweep can prune old entries from the in-memory `jobs` dict,
+    which currently grows by one per upload until the process restarts.
+
+  Once this is in place, the README's advice to keep a separate operational
+  cleanup policy can be replaced with a description of the built-in one.
+
 ## Planned improvments
 
 - [ ] Consider summarising the marked-up text rather than the original when
