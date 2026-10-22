@@ -1,5 +1,7 @@
 # Backlog - JBGTransciption
 
+Version 1.0.0 (git tag `v1.0.0`)
+
 ## Known issues
 
 - [ ] Uploaded audio and finished results can stay on the server indefinitely.
