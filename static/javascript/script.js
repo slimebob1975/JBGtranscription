@@ -1,6 +1,11 @@
 // ✅ On page load: enable/disable fields based on API key presence
 let globalEncryptionKeyBase64 = "";
 
+// Accepted audio formats and the largest upload, replaced by the values from
+// /config when it answers. The server checks both again.
+let supportedAudioExtensions = [".mp3", ".m4a", ".wav", ".aac", ".flac", ".ogg"];
+let maxUploadMb = 1024;
+
 // --- Editable summary instruction -------------------------------------------
 // The two default texts ("Enkel" and "Utförlig") are fetched from the backend so
 // that policy/prompt_policy.json stays the single source of truth. The user may
@@ -343,6 +348,13 @@ fetch("/config")
     document.title = data.title;
     document.getElementById("app-title").innerText = data.title;
     showVersion(data.version);
+    if (Array.isArray(data.audio_extensions) && data.audio_extensions.length) {
+      supportedAudioExtensions = data.audio_extensions;
+      document.getElementById("audioFile").accept = supportedAudioExtensions.join(",");
+    }
+    if (data.max_upload_mb > 0) {
+      maxUploadMb = data.max_upload_mb;
+    }
     const checkbox = document.getElementById('enableEncryption');
     if (data.encryption_is_optional === "1") {
       checkbox.disabled = false;
@@ -431,8 +443,18 @@ async function uploadFile() {
     }
 
     const file = fileInput.files[0];
-    if (file.type !== "audio/mpeg") {
-        alert("Only MP3 files are allowed.");
+    // By extension rather than by file.type: browsers report m4a and wav under
+    // several different MIME types, and sometimes none at all.
+    const dot = file.name.lastIndexOf(".");
+    const extension = dot >= 0 ? file.name.slice(dot).toLowerCase() : "";
+    if (!supportedAudioExtensions.includes(extension)) {
+        const allowed = supportedAudioExtensions.map(e => e.slice(1)).join(", ");
+        alert(`Filformatet stöds inte. Tillåtna format: ${allowed}.`);
+        return;
+    }
+    if (file.size > maxUploadMb * 1024 * 1024) {
+        const sizeMb = Math.ceil(file.size / (1024 * 1024));
+        alert(`Filen är ${sizeMb} MB. Den största tillåtna storleken är ${maxUploadMb} MB.`);
         return;
     }
 

@@ -1,6 +1,6 @@
 # 📄 JBG Transkribering
 
-**JBG Transkribering** is a browser-based audio transcription service built with **FastAPI**. It transcribes `.mp3` files locally with KB-Whisper and can optionally use OpenAI models for summaries and other text analysis.
+**JBG Transkribering** is a browser-based audio transcription service built with **FastAPI**. It transcribes audio files (mp3, m4a, wav, aac, flac and ogg) locally with KB-Whisper and can optionally use OpenAI models for summaries and other text analysis.
 
 The completed transcription and selected analyses are assembled as a **Microsoft Word (`.docx`) document**. The result is no longer displayed in the GUI. When processing is complete, the browser automatically downloads the DOCX. With encryption enabled, the DOCX package is created in memory and only AES-GCM-encrypted bytes are written to the server-side `results/` folder.
 
@@ -8,7 +8,7 @@ The completed transcription and selected analyses are assembled as a **Microsoft
 
 ## 🚀 Features
 
-- 🎙️ Upload `.mp3` audio files for transcription
+- 🎙️ Upload audio files for transcription: mp3, m4a, wav, aac, flac or ogg
 - 🧠 Optional OpenAI-powered analysis:
   - Generate a **summary** from an editable instruction, chosen from a configurable set of summary types
   - Flag **suspected transcription errors**
@@ -153,7 +153,7 @@ Then open:
 
 ### How to use
 
-1. Select an `.mp3` file.
+1. Select an audio file (mp3, m4a, wav, aac, flac or ogg).
 2. Enter an OpenAI API key if you want to use the optional analysis functions.
 3. Select an OpenAI model.
 4. Select the desired analysis options.
@@ -170,9 +170,9 @@ The transcription text itself is never inserted into the GUI.
 The web interface can encrypt the uploaded audio and the generated DOCX result with the same browser-generated AES-256-GCM key:
 
 1. An **AES-256-GCM** key is generated locally in the browser.
-2. The `.mp3` content is encrypted in the browser before upload.
+2. The audio file is encrypted in the browser before upload.
 3. The encrypted audio and base64-encoded key are sent to the server over the application connection.
-4. The server decrypts the audio **in memory** for transcription.
+4. The server decrypts the audio **in memory** and decodes it there with PyAV, so the decrypted audio is never written to disk. It is deliberately not handed to ffmpeg, whose `cache:` input protocol would buffer it in a temporary file.
 5. After transcription and all requested analyses, `python-docx` builds the Word package in an in-memory `BytesIO` stream.
 6. The in-memory DOCX bytes are encrypted with AES-256-GCM before being written to the `results/` directory. No plaintext DOCX temporary file is created in encrypted mode.
 7. When processing is complete, the frontend automatically calls the download endpoint. The encryption key is sent in POST form data rather than in the URL.
@@ -541,6 +541,18 @@ With the value `0`, encryption is mandatory in the GUI and the backend rejects u
 
 With the value `1`, the user may turn encryption off. In that mode the result is temporarily stored as a normal DOCX until it has been streamed to the browser and deleted.
 
+### Audio formats and upload size
+
+The accepted formats are mp3, m4a, wav, aac, flac and ogg, defined in `SUPPORTED_AUDIO_EXTENSIONS` in `src/JBGtranscriber.py`. The page and the server both check the extension, and the decoder identifies the actual format from the content, so a file whose content is not audio fails with an error in the GUI. Video containers such as mp4 are not accepted, even though the decoder could extract their audio track.
+
+`JBG_MAX_UPLOAD_MB` sets the largest file that can be uploaded:
+
+```env
+JBG_MAX_UPLOAD_MB=1024
+```
+
+The default is 1024 MB. The page refuses a larger file before uploading it, and the server rejects one with status 413. For scale, a one-hour interview is about 55 MB as mp3 at 128 kbit/s, but about 600 MB as stereo 16-bit wav at 44.1 kHz. With encryption on, the browser holds the file twice in memory while encrypting it, which is the main reason not to raise the limit much further.
+
 ### Retention of files left on the server
 
 `JBG_RETENTION_HOURS` sets how long a file may stay in `uploads/` or `results/` before it is deleted, counted from when it was last written:
@@ -623,7 +635,7 @@ python src/JBGtranscriber.py [input_path] [output_folder] [cpu|gpu] [openai_api_
 python src/JBGtranscriber.py ./audio ./results cpu sk-xxxxxx gpt-5.2 extensive
 ```
 
-The command accepts either a single `.mp3` file or a directory containing `.mp3` files. Each input file produces a corresponding `.docx` file in the selected output directory.
+The command accepts either a single audio file or a directory, in which every file with a supported extension (mp3, m4a, wav, aac, flac, ogg) is processed. Each input file produces a corresponding `.docx` file in the selected output directory.
 
 ---
 

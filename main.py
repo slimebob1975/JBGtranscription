@@ -9,7 +9,6 @@ import time
 from contextlib import asynccontextmanager, suppress
 from dotenv import load_dotenv
 import sys
-import shutil
 import uuid
 import re
 import src.JBGtranscriber as JBGtranscriber
@@ -22,6 +21,7 @@ from src.JBGtranscriber import (
     DEFAULT_TRANSCRIPTION_ACCURACY,
     ENGINE_FASTER_WHISPER,
     ENGINE_TRANSFORMERS,
+    SUPPORTED_AUDIO_EXTENSIONS,
 )
 from src.JBGSecureFileHandler import SecureFileHandler
 from src.JBGBuildInfo import get_build_info
@@ -173,6 +173,37 @@ def clean_up_audio_file(audio_file_path: Path):
         logger.info(f"Uppladdad ljudfil raderad efter transkribering: {audio_file_path}")
     except Exception as e:
         logger.warning(f"Misslyckades med att radera uppladdad ljudfil {audio_file_path}: {e}")
+
+
+DEFAULT_MAX_UPLOAD_MB = 1024
+
+
+def read_max_upload_mb() -> int:
+    """Read JBG_MAX_UPLOAD_MB, falling back to the default for a missing or bad value."""
+    raw = os.getenv("JBG_MAX_UPLOAD_MB", "").strip()
+    if not raw:
+        return DEFAULT_MAX_UPLOAD_MB
+    try:
+        value = int(raw)
+        if value > 0:
+            return value
+    except ValueError:
+        pass
+    logger.warning(f"JBG_MAX_UPLOAD_MB={raw!r} är inte ett positivt heltal. Använder {DEFAULT_MAX_UPLOAD_MB} MB.")
+    return DEFAULT_MAX_UPLOAD_MB
+
+
+def audio_extension(upload_filename: str):
+    """Return the lower-case audio extension of an upload, or None if unsupported.
+
+    An encrypted upload arrives as e.g. "intervju.m4a.enc"; the extension of
+    the original file is the one that counts.
+    """
+    name = upload_filename or ""
+    if name.lower().endswith(".enc"):
+        name = name[:-4]
+    extension = Path(name).suffix.lower()
+    return extension if extension in SUPPORTED_AUDIO_EXTENSIONS else None
 
 
 def make_result_filename(upload_filename: str, file_id: str) -> str:
@@ -345,6 +376,8 @@ def get_config():
         "title": title,
         "encryption_is_optional": encryption_is_optional,
         "version": get_build_info(),
+        "audio_extensions": list(SUPPORTED_AUDIO_EXTENSIONS),
+        "max_upload_mb": read_max_upload_mb(),
     }
 
 
@@ -411,6 +444,13 @@ async def upload_audio(
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid encryption key.")
 
+    extension = audio_extension(file.filename)
+    if extension is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported audio format. Allowed: " + ", ".join(SUPPORTED_AUDIO_EXTENSIONS),
+        )
+
     # The valid ids come from the prompt policy, so adding an option there is
     # enough. Ids retired in an earlier version are still accepted and mapped.
     summary_options = JBGtranscriber.JBGtranscriber.summary_options()
@@ -466,7 +506,7 @@ async def upload_audio(
           """)
 
     file_id = str(uuid.uuid4())
-    file_path = UPLOAD_FOLDER / (file_id + (".mp3.encrypted" if encryption_key else ".mp3"))
+    file_path = UPLOAD_FOLDER / (file_id + extension + (".encrypted" if encryption_key else ""))
     download_filename = make_result_filename(file.filename, file_id)
     storage_filename = download_filename + (".encrypted" if encryption_key else "")
     result_path = RESULTS_FOLDER / storage_filename
@@ -485,8 +525,23 @@ async def upload_audio(
     else:
         logger.info("Ej krypterad fil sparas...")
 
+    # The browser checks the size before uploading; this is the check for
+    # requests that do not come from the page. Encryption adds 28 bytes.
+    max_bytes = read_max_upload_mb() * 1024 * 1024 + 28
+    written = 0
     with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        while chunk := file.file.read(1024 * 1024):
+            written += len(chunk)
+            if written > max_bytes:
+                break
+            buffer.write(chunk)
+    if written > max_bytes:
+        file_path.unlink(missing_ok=True)
+        jobs.pop(file_id, None)
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds the maximum upload size of {read_max_upload_mb()} MB.",
+        )
 
     background_tasks.add_task(
         transcribe_audio,

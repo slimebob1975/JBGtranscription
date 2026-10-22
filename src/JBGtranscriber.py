@@ -352,6 +352,11 @@ EXTRA_MODEL_OPTIONS = {
 # Resampling target rate
 RESAMPLING_TARGET_RATE = 16000
 
+# Audio formats accepted for transcription, by file extension. PyAV and ffmpeg
+# identify the actual format from the content; the list keeps out video and
+# anything else they could open but that does not belong here.
+SUPPORTED_AUDIO_EXTENSIONS = (".mp3", ".m4a", ".wav", ".aac", ".flac", ".ogg")
+
 logger = JBGLogger(level="DEBUG").logger
 
 
@@ -611,10 +616,13 @@ class JBGtranscriber():
         return result
     
     @staticmethod
-    def find_mp3_files(path):
-        """Generates a list of mp3 files from a path"""
-        
-        return [file for file in Path(path).rglob("*.mp3")]
+    def find_audio_files(path):
+        """Generates a list of supported audio files from a path"""
+
+        return sorted(
+            file for file in Path(path).rglob("*")
+            if file.is_file() and file.suffix.lower() in SUPPORTED_AUDIO_EXTENSIONS
+        )
     
     @staticmethod
     def get_permitted_temperature(gpt_model, temperature):
@@ -1778,25 +1786,23 @@ class JBGtranscriber():
         else:
             logger.warning(f" Cannot use cached transcriptions and encryption as the same time")
             if self.audio_stream:
-                from pydub import AudioSegment
-                import io
+                from faster_whisper import decode_audio
 
                 self.audio_stream.seek(0)
                 try:
-                    # Läs MP3 från stream
-                    audio = AudioSegment.from_file(io.BytesIO(self.audio_stream.read()), format="mp3")
-
-                    # Konvertera till mono, 16-bit, 16kHz om det behövs
-                    audio = audio.set_channels(1).set_sample_width(2)
-                    original_rate = audio.frame_rate
-                    if original_rate != RESAMPLING_TARGET_RATE:
-                        logger.info(f"Resampling from {original_rate} Hz to {RESAMPLING_TARGET_RATE} Hz")
-                        audio = audio.set_frame_rate(RESAMPLING_TARGET_RATE)
-                    self.samplerate = audio.frame_rate
-
-                    # Extrahera samples
-                    samples = np.array(audio.get_array_of_samples(), dtype=np.float32) / 32768.0
-                    self.audio_data = samples
+                    # The decrypted audio is decoded inside this process with
+                    # PyAV, straight from memory, into 16 kHz mono float32.
+                    # pydub was used before, but it hands the bytes to ffmpeg
+                    # and ffprobe through their cache: protocol, which buffers
+                    # the input in a temporary file, so the decrypted audio
+                    # reached the disk. PyAV also identifies the format from
+                    # the content, so every supported format works.
+                    self.audio_data = decode_audio(self.audio_stream, sampling_rate=RESAMPLING_TARGET_RATE)
+                    self.samplerate = RESAMPLING_TARGET_RATE
+                    logger.info(
+                        f"Ljudet avkodat i minnet: "
+                        f"{JBGtranscriber._format_duration(len(self.audio_data) / RESAMPLING_TARGET_RATE)}"
+                    )
                 except Exception as e:
                     logger.error(f" Failed to load or process audio stream: {e}")
                     raise e
@@ -2451,7 +2457,7 @@ class JBGtranscriber():
 def check_script_arguments():
     """Check command-line arguments for the test script""" 
     if len(sys.argv) < 6:
-        sys.exit("Usage: " + sys.argv[0] + " [path to .mp3 file or folder] [output folder] [device=gpu/cpu] [openai_api_key] (optional: model) (optional: summary style)")
+        sys.exit("Usage: " + sys.argv[0] + " [path to audio file or folder] [output folder] [device=gpu/cpu] [openai_api_key] (optional: model) (optional: summary style)")
 
     convert_path = Path(sys.argv[1])
     export_path = Path(sys.argv[2])
@@ -2481,7 +2487,7 @@ def main():
 
     # Gather files to process
     if convert_path.is_dir():
-        convert_files = JBGtranscriber.find_mp3_files(convert_path)
+        convert_files = JBGtranscriber.find_audio_files(convert_path)
     else:
         convert_files = [convert_path]
 

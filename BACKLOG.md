@@ -47,24 +47,20 @@ The version number is kept only in `VERSION`, and each release is tagged
   segment count is predictable from the transcription length.
 - [ ] Investigate if batching and moving window can improve execution time for the transcription step without big loss of accuracy
 - [ ] Investigare if a faster-Whisper model can improve execution time without big loss of accuracy
-- [ ] Accept other audio formats than mp3. .wav and .m4a turn up often in
-  practice. ffmpeg already handles them, so this is less work than it looks:
-  the restriction is that `AudioSegment.from_file` is called with
-  `format="mp3"`, that the file input accepts only `.mp3,audio/mpeg`, and that
-  the upload path hardcodes a `.mp3` suffix. Dropping the explicit format lets
-  pydub detect the container. Three things to settle at the same time:
-
-  - Validation. Accepting whatever ffmpeg can open also accepts video
-    containers. Either list the permitted formats explicitly, or decide that
-    pulling the audio out of an .mp4 is a feature rather than a mistake.
-  - File size. A 68 minute interview is about 95 MB as mp3 and roughly 700 MB
-    as 16-bit wav. That has to pass through the upload, the encryption step and
-    the instance's scratch space, on a plan with 7.71 GB of memory.
-  - The filename suffix used for the upload and for the result document, which
-    currently assumes mp3.
 
 ## Solved
 
+- [X] Accept other audio formats than mp3: mp3, m4a, wav, aac, flac and ogg,
+  listed in `SUPPORTED_AUDIO_EXTENSIONS`. Video containers are left out on
+  purpose. The page and the server check the extension, the upload keeps its
+  own suffix, and `JBG_MAX_UPLOAD_MB` (1024 by default) caps the size in both
+  places. In encrypted mode the decrypted audio is now decoded in memory with
+  PyAV (`faster_whisper.decode_audio`) instead of pydub. pydub passed it to
+  ffmpeg and ffprobe through their `cache:` protocol, which buffers the input
+  in a temporary file, so the decrypted audio reached the disk in every
+  encrypted run, mp3 included. `av` is pinned to 18.1.0, since faster-whisper
+  1.1.1 calls `av.open(metadata_errors=...)`, which PyAV 19 removed; unpinned,
+  a fresh install broke the fast engine for unencrypted files
 - [X] Show the version number and GitHub commit under the application title,
   e.g. "Version 1.1.0 · a1b2c3d (prod)", with the commit linking to GitHub,
   as in Klarspråkshjälpen. The version is in `VERSION`; commit, branch, run

@@ -14,7 +14,7 @@
         <h1 label="app-title" id="app-title">JBG transkribering</h1>
         <!-- Fylls i av script.js från /config: version, commit och miljö -->
         <p id="versionDisplay" class="version-display" hidden></p>
-        <h3><em>För .mp3-filer</em></h3>
+        <h3><em>För ljudfiler: mp3, m4a, wav m.fl.</em></h3>
         <header style="margin-top: 1rem; font-size: 0.85rem; text-align: left; color: #555;">
             <p id="userDisplay" style="font-style: italic;"></p>
         </header>
@@ -22,7 +22,7 @@
         <!-- File selector -->
         <fieldset class="settings-panel" id="upload-options">
             <legend><h4>Ladda upp din ljudfil</h4></legend>
-            <input type="file" id="audioFile" accept=".mp3,audio/mpeg" title="Ladda upp .mp3-fil">
+            <input type="file" id="audioFile" accept=".mp3,.m4a,.wav,.aac,.flac,.ogg" title="Ladda upp en ljudfil: mp3, m4a, wav, aac, flac eller ogg">
             <label>
                 <input type="checkbox" id="enableEncryption" title="Ljudfilen och det färdiga dokumentet sparas krypterade på servern" checked>
                 Använd kryptering (rekommenderas)
