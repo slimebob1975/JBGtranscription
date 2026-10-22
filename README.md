@@ -541,6 +541,27 @@ With the value `0`, encryption is mandatory in the GUI and the backend rejects u
 
 With the value `1`, the user may turn encryption off. In that mode the result is temporarily stored as a normal DOCX until it has been streamed to the browser and deleted.
 
+### Retention of files left on the server
+
+`JBG_RETENTION_HOURS` sets how long a file may stay in `uploads/` or `results/` before it is deleted, counted from when it was last written:
+
+```env
+JBG_RETENTION_HOURS=24
+```
+
+The default is 24 hours. The cleanup runs when the application starts and then once an hour. It only matters for files that normal processing did not remove: an upload whose job was cut short by a restart, or a result that was never downloaded.
+
+The value must be a whole number of hours. A value below 3 is raised to 3, since a job may run for up to two hours (`--timeout 7200` in `startup.sh`) and its upload must not be deleted while it is still being transcribed. If a result should remain downloadable longer, for example over a weekend, raise the value.
+
+Files are selected by age only. The folders are never emptied wholesale, because several instances can share the same disk, and one that restarts must not delete an upload that another is still working on.
+
+### Version
+
+The page shows the version under the title, e.g. "Version 1.1.0 · a1b2c3d (prod)", with the commit linking to GitHub. The same information appears as "Programversion" in the "Om transkriberingen" section of every result document, so a result can be traced to the code that produced it.
+
+- The version number is kept only in the file `VERSION`; other places, such as `BACKLOG.md`, refer to it. Update it by hand for each release and tag the commit with the same number, e.g. `v1.1.0`.
+- Commit, branch and environment come from `build_info.json`, written by `scripts/write_build_info.py` in the build step of both workflows, since the deployed package does not contain `.git`. Locally, the commit is read from git; without git the line shows only the version and "(lokal)".
+
 ### What "encrypted on the server" means
 
 With encryption enabled, audio and DOCX result files are encrypted **at rest on server disk**. The application must still hold plaintext transiently in RAM while it transcribes the audio, performs text analysis, constructs the DOCX and streams the downloaded document. This is the same basic security model as the previous encrypted TXT workflow.
@@ -617,7 +638,7 @@ az webapp up --name jbg-transkribering --resource-group jbg-rg --sku B1 --runtim
 az webapp config set --name jbg-transkribering --resource-group jbg-rg --startup-file startup.sh
 ```
 
-The application uses its local `results/` directory as temporary result storage while a completed DOCX is waiting to be downloaded. In encrypted mode those files contain AES-GCM ciphertext rather than a readable Word package. Files are deleted after their download response has finished streaming, although stale files can remain after interrupted jobs or failed downloads and should be covered by an operational cleanup policy.
+The application uses its local `results/` directory as temporary result storage while a completed DOCX is waiting to be downloaded. In encrypted mode those files contain AES-GCM ciphertext rather than a readable Word package. Files are deleted after their download response has finished streaming. Files left behind by interrupted jobs or failed downloads are deleted once they are older than `JBG_RETENTION_HOURS` (24 hours by default).
 
 ---
 
@@ -631,7 +652,7 @@ The application uses its local `results/` directory as temporary result storage 
 - The AES key exists only in the current browser page session. Reloading or closing the page before the automatic download loses that key; an encrypted result left on the server would then require cleanup rather than recovery through the GUI.
 - The stored result file is deleted after the download response has finished streaming.
 - A server cannot reliably know that the browser ultimately saved a file to the user's filesystem; it can only know that the full HTTP response was delivered.
-- Interrupted processing or failed downloads can leave stale files in `uploads/` or `results/`; retain a separate cleanup policy for those cases.
+- Interrupted processing or failed downloads can leave files in `uploads/` or `results/`. The application deletes them once they are older than `JBG_RETENTION_HOURS` (24 hours by default), so such a file can stay on disk for up to that long plus one hour.
 - Set `ENCRYPTION_IS_OPTIONAL=0` when plaintext server-side result files must never be permitted by application configuration.
 - The OpenAI API key is not intentionally stored server-side.
 
@@ -639,9 +660,9 @@ The application uses its local `results/` directory as temporary result storage 
 
 ## 🧼 Cleanup
 
-Normal successful web runs delete the temporary uploaded audio and remove the result file after it has been streamed to the browser. Operational cleanup is still recommended for interrupted jobs and failed downloads.
+Normal successful web runs delete the temporary uploaded audio and remove the result file after it has been streamed to the browser. A failed job also deletes its upload. Files left behind by a restart mid-job or a result that was never downloaded are removed by the built-in cleanup once they are older than `JBG_RETENTION_HOURS`; see *Retention of files left on the server*.
 
-Example manual cleanup in PowerShell:
+To empty the folders by hand, for example on a development machine, stop the application first so that no active job is affected. In PowerShell:
 
 ```powershell
 Remove-Item .\uploads\* -Force
@@ -649,8 +670,6 @@ Remove-Item .\results\*.docx.encrypted -Force
 Remove-Item .\results\*.docx -Force
 Remove-Item .\results\*.tmp -Force
 ```
-
-For production use, prefer a retention rule that only removes stale files older than an appropriate threshold rather than deleting active jobs.
 
 ---
 

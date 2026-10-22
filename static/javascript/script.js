@@ -313,11 +313,36 @@ function setUpSummaryPromptEditor() {
         });
 }
 
+// Version, commit och miljö under rubriken, t.ex. "Version 1.1.0 · a1b2c3d (dev)".
+// Commit länkar till GitHub när adressen är känd. Texten sätts som ren text.
+function showVersion(version) {
+  const line = document.getElementById("versionDisplay");
+  if (!line || !version || !version.version) return;
+  line.textContent = `Version ${version.version}`;
+  if (version.commit_short) {
+    line.append(" · ");
+    if (version.commit_url) {
+      const link = document.createElement("a");
+      link.href = version.commit_url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = version.commit_short;
+      link.title = `Commit ${version.commit}${version.branch ? " på grenen " + version.branch : ""}`;
+      line.append(link);
+    } else {
+      line.append(version.commit_short);
+    }
+  }
+  line.append(` (${version.environment})`);
+  line.hidden = false;
+}
+
 fetch("/config")
   .then(res => res.json())
   .then(data => {
     document.title = data.title;
     document.getElementById("app-title").innerText = data.title;
+    showVersion(data.version);
     const checkbox = document.getElementById('enableEncryption');
     if (data.encryption_is_optional === "1") {
       checkbox.disabled = false;

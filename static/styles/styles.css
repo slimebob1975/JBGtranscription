@@ -32,6 +32,24 @@ h1 {
     margin-bottom: 0.5rem;
 }
 
+/* === Version under rubriken === */
+/* Pulled up towards the title; the side margins come from the shared
+   content column rule further down. */
+.version-display {
+    margin-top: -0.35rem;
+    margin-bottom: 0.5rem;
+    font-size: 0.75rem;
+    color: #777;
+}
+
+.version-display a {
+    color: inherit;
+}
+
+.version-display[hidden] {
+    display: none;
+}
+
 h3 {
     font-weight: normal;
     /* color: #444; */ /* Behålls */

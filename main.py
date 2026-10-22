@@ -4,6 +4,9 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.background import BackgroundTask
 import os
+import asyncio
+import time
+from contextlib import asynccontextmanager, suppress
 from dotenv import load_dotenv
 import sys
 import shutil
@@ -21,6 +24,7 @@ from src.JBGtranscriber import (
     ENGINE_TRANSFORMERS,
 )
 from src.JBGSecureFileHandler import SecureFileHandler
+from src.JBGBuildInfo import get_build_info
 from pathlib import Path
 import torch
 from src.JBGLogger import JBGLogger
@@ -30,8 +34,20 @@ from io import BytesIO
 
 logger = JBGLogger(level="DEBUG").logger
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # The cleanup loop is defined further down; it runs for as long as the app.
+    cleanup_task = asyncio.create_task(cleanup_loop())
+    try:
+        yield
+    finally:
+        cleanup_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await cleanup_task
+
+
 try:
-    app = FastAPI()
+    app = FastAPI(lifespan=lifespan)
 except Exception as e:
     logger.error(f"FastAPI ERROR:", e, file=sys.stderr)
     raise
@@ -53,6 +69,98 @@ os.chmod(RESULTS_FOLDER, 0o777)
 
 # In-memory job status store: file_id -> dict
 jobs = {}
+
+# Files are normally deleted when a job ends or a download completes. Anything
+# left behind by a failed setup, a restart mid-job or a result nobody
+# downloaded is removed here once it is older than the retention time. The
+# rule is age alone, not "empty uploads/ at startup": the folders sit on disk
+# that several instances can share, and a restarting instance must not delete
+# an upload that another one is still transcribing.
+DEFAULT_RETENTION_HOURS = 24
+# Must exceed the longest job. startup.sh lets Gunicorn run one for up to two
+# hours (--timeout 7200), so a lower setting is raised to this.
+MIN_RETENTION_HOURS = 3
+CLEANUP_INTERVAL_SECONDS = 3600
+
+
+def read_retention_hours() -> int:
+    """Read JBG_RETENTION_HOURS, falling back to the default and enforcing the minimum."""
+    raw = os.getenv("JBG_RETENTION_HOURS", "").strip()
+    if not raw:
+        return DEFAULT_RETENTION_HOURS
+    try:
+        hours = int(raw)
+    except ValueError:
+        logger.warning(
+            f"JBG_RETENTION_HOURS={raw!r} är inte ett heltal. "
+            f"Använder {DEFAULT_RETENTION_HOURS} timmar."
+        )
+        return DEFAULT_RETENTION_HOURS
+    if hours < MIN_RETENTION_HOURS:
+        logger.warning(
+            f"JBG_RETENTION_HOURS={hours} är kortare än det längsta jobbet. "
+            f"Använder {MIN_RETENTION_HOURS} timmar."
+        )
+        return MIN_RETENTION_HOURS
+    return hours
+
+
+def remove_stale_files(max_age_seconds: float, now: float = None) -> int:
+    """Delete files in uploads/ and results/ last modified more than max_age_seconds ago."""
+    now = time.time() if now is None else now
+    removed = 0
+    for folder in (UPLOAD_FOLDER, RESULTS_FOLDER):
+        try:
+            entries = list(folder.iterdir())
+        except FileNotFoundError:
+            continue
+        for path in entries:
+            try:
+                if not path.is_file():
+                    continue
+                if now - path.stat().st_mtime <= max_age_seconds:
+                    continue
+                path.unlink(missing_ok=True)
+                removed += 1
+            except Exception as e:
+                logger.warning(f"Kunde inte radera gammal fil {path}: {e}")
+    return removed
+
+
+def prune_jobs(max_age_seconds: float, now: float = None) -> int:
+    """Drop job entries older than max_age_seconds from the in-memory store."""
+    now = time.time() if now is None else now
+    pruned = 0
+    for file_id, job in list(jobs.items()):
+        created = job.get("created")
+        if created is not None and now - created > max_age_seconds:
+            jobs.pop(file_id, None)
+            pruned += 1
+    return pruned
+
+
+def run_cleanup(retention_hours: int):
+    max_age_seconds = retention_hours * 3600
+    removed = remove_stale_files(max_age_seconds)
+    pruned = prune_jobs(max_age_seconds)
+    if removed or pruned:
+        logger.info(
+            f"Rensning: {removed} filer äldre än {retention_hours} timmar raderade, "
+            f"{pruned} gamla jobb borttagna ur minnet."
+        )
+
+
+async def cleanup_loop():
+    """Run the cleanup at startup and then once per interval, off the event loop."""
+    # Read here rather than at import, so that load_dotenv() has run.
+    retention_hours = read_retention_hours()
+    logger.info(f"Filer i uploads/ och results/ raderas när de är äldre än {retention_hours} timmar.")
+    while True:
+        try:
+            await asyncio.to_thread(run_cleanup, retention_hours)
+        except Exception as e:
+            logger.warning(f"Rensningen av gamla filer misslyckades: {e}")
+        await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
 
 
 def clean_up_audio_file(audio_file_path: Path):
@@ -137,16 +245,13 @@ def transcribe_audio(
     speakers: bool,
 ):
     logger.info(f"Transcribe audio was called with encryption key: {encryption_key != ''}")
-    if encryption_key:
-        secure_handler = SecureFileHandler(encryption_key)
-    else:
-        secure_handler = None
 
     # Ensure there is a job entry
     jobs.setdefault(file_id, {
         "status": "Transkribering initieras...",
         "done": False,
         "error": None,
+        "created": time.time(),
     })
 
     def progress_callback(message: str):
@@ -154,22 +259,31 @@ def transcribe_audio(
         if job is not None:
             job["status"] = message
 
-    transcriber = JBGtranscriber.JBGtranscriber(
-        Path(file_path),
-        Path(result_path),
-        device=device,
-        api_key=api_key,
-        openai_model=openai_model,
-        secure_handler=secure_handler,
-    )
-
-    if secure_handler:
-        audio_stream = secure_handler.decrypt_file_to_memory(file_path)
-    else:
-        audio_stream = None
-    transcriber.audio_stream = audio_stream
-
     try:
+        # Setup belongs inside the try as well. If the key handler, the
+        # transcriber or the decryption fails, the upload must still be
+        # deleted and the job ended, or the file stays on the server and the
+        # client keeps polling a job that will never finish.
+        if encryption_key:
+            secure_handler = SecureFileHandler(encryption_key)
+        else:
+            secure_handler = None
+
+        transcriber = JBGtranscriber.JBGtranscriber(
+            Path(file_path),
+            Path(result_path),
+            device=device,
+            api_key=api_key,
+            openai_model=openai_model,
+            secure_handler=secure_handler,
+        )
+
+        if secure_handler:
+            audio_stream = secure_handler.decrypt_file_to_memory(file_path)
+        else:
+            audio_stream = None
+        transcriber.audio_stream = audio_stream
+
         transcriber.perform_transcription_steps(
             generate_summary=summarize,
             summary_style=summary_style,
@@ -196,7 +310,9 @@ def transcribe_audio(
         clean_up_audio_file(Path(file_path))
         job = jobs.setdefault(file_id, {})
         job["done"] = True
-        job["error"] = str(e)
+        # Some exceptions carry no message, cryptography's InvalidTag among
+        # them. An empty error would read as success in the status endpoint.
+        job["error"] = str(e) or type(e).__name__
         job["status"] = "Ett fel uppstod vid transkriberingen."
 
 
@@ -225,7 +341,11 @@ def get_config():
     logger.info(f" Appens titel: {title}")
     encryption_is_optional = os.getenv("ENCRYPTION_IS_OPTIONAL", "1")
     logger.info(f" Kryptering är tillval: {encryption_is_optional}")
-    return {"title": title, "encryption_is_optional": encryption_is_optional}
+    return {
+        "title": title,
+        "encryption_is_optional": encryption_is_optional,
+        "version": get_build_info(),
+    }
 
 
 # Selectable, editable summary instructions for the GUI. Served from the prompt
@@ -357,6 +477,7 @@ async def upload_audio(
         "error": None,
         "download_filename": download_filename,
         "encrypted": bool(encryption_key),
+        "created": time.time(),
     }
 
     if encryption_key:

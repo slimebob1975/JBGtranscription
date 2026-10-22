@@ -24,6 +24,7 @@ try:
 except ModuleNotFoundError as ex:
     sys.exit("You probably need to install some missing modules:" + str(ex))
 from src.JBGLogger import JBGLogger
+from src.JBGBuildInfo import get_build_info
     
 # Default markers
 CACHE_TRANSCRIPTION_MARKER = "===TRANSCRIPTION==="
@@ -2222,12 +2223,13 @@ class JBGtranscriber():
                 cell.text = str(value)
 
     def _transcription_provenance(self):
-        """A short note on which model produced the transcription.
+        """A short note on which model and which program version produced it.
 
         The chosen accuracy is a ceiling, and the model actually used may be a
         smaller one if the available RAM did not allow the choice. That
         fallback is otherwise invisible, so it is recorded here: someone who
-        picked a level deserves to know what they got.
+        picked a level deserves to know what they got. The program version
+        lets every result document be traced to the code that produced it.
         """
         level = self.transcription_accuracy
         wanted = TRANSCRIPTION_ACCURACY_MODELS.get(level, "")
@@ -2247,7 +2249,14 @@ class JBGtranscriber():
                 f" Den valda nivån motsvarar {wanted}, men tillgängligt minne "
                 "räckte inte, så en mindre modell användes i stället."
             )
-        return line
+        return line + "\n\n" + f"Programversion: {JBGtranscriber._program_version()}."
+
+    @staticmethod
+    def _program_version():
+        """Version with commit and environment, e.g. "1.1.0 (a1b2c3d, prod)"."""
+        build = get_build_info()
+        details = [d for d in (build["commit_short"], build["environment"]) if d]
+        return build["version"] + (f" ({', '.join(details)})" if details else "")
 
     def _transcription_section(self):
         """Return the single transcription section for the result document.

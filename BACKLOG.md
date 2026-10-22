@@ -1,42 +1,9 @@
 # Backlog - JBGTransciption
 
-Version 1.0.0 (git tag `v1.0.0`)
+The version number is kept only in `VERSION`, and each release is tagged
+`v<version>` on GitHub.
 
 ## Known issues
-
-- [ ] Uploaded audio and finished results can stay on the server indefinitely.
-  Deletion is event-driven only: the upload is removed when
-  `transcribe_audio` finishes, and the result when its download has finished
-  streaming. Nothing sweeps `uploads/` or `results/` on a timer, at startup or
-  by age, so three cases leave files behind:
-
-  - Setup fails. The `JBGtranscriber` constructor and
-    `decrypt_file_to_memory` run before the `try` in `transcribe_audio`, so
-    an exception there skips both cleanup calls. The job is also never
-    marked done, and the client keeps polling.
-  - The process dies mid-job. A Gunicorn timeout, an instance restart or a
-    redeploy ends the background task before it reaches cleanup.
-  - The result is never downloaded. Closing the tab or a failed download
-    leaves the result in place, and with encryption off it is a readable
-    DOCX.
-
-  Planned fix, in three parts:
-
-  - Move the constructor and the decryption inside the `try`, so a failure
-    there deletes the upload and reports the error like any other.
-  - Empty `uploads/` at startup. With one worker no job survives a restart,
-    so anything there is orphaned. `results/` is left alone, since a
-    finished result can still be downloaded after a restart through
-    `find_result_path`.
-  - Delete files in both folders older than a configurable age, for example
-    `JBG_RETENTION_HOURS`, checked periodically. The age must exceed the
-    Gunicorn timeout of two hours, or an upload could be deleted while it is
-    still being transcribed, and leave a reasonable window for the download.
-    The same sweep can prune old entries from the in-memory `jobs` dict,
-    which currently grows by one per upload until the process restarts.
-
-  Once this is in place, the README's advice to keep a separate operational
-  cleanup policy can be replaced with a description of the built-in one.
 
 ## Planned improvments
 
@@ -98,6 +65,23 @@ Version 1.0.0 (git tag `v1.0.0`)
 
 ## Solved
 
+- [X] Show the version number and GitHub commit under the application title,
+  e.g. "Version 1.1.0 · a1b2c3d (prod)", with the commit linking to GitHub,
+  as in Klarspråkshjälpen. The version is in `VERSION`; commit, branch, run
+  number and build time are written to `build_info.json` by
+  `scripts/write_build_info.py` in the build step of both workflows, because
+  the deployed package does not contain `.git`, and locally the commit is
+  read from git. `/config` returns the information, and the "Om
+  transkriberingen" section of the result document gives it as
+  "Programversion"
+- [X] Stop uploads and results from staying on the server indefinitely. A
+  failure while setting up a job now deletes the upload and ends the job like
+  any other error, and files in `uploads/` and `results/` older than
+  `JBG_RETENTION_HOURS` (24 by default, at least 3) are deleted at startup
+  and once an hour. The rule is age alone rather than emptying `uploads/` at
+  startup, since the folders can be shared by several instances. Old entries
+  in the in-memory `jobs` dict are pruned by the same sweep, and an error
+  without a message is stored as its type name instead of reading as success
 - [X] Take speaker identification out of beta. Two runs of a seven-segment
   recording, with six register hand-offs each, produced the same five
   speakers and no verbatim repetition at any seam; the single-call runs it
