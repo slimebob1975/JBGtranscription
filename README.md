@@ -518,6 +518,15 @@ The server rejects a request with the custom analysis checked but nothing writte
 
 All three instructions are capped at 20 000 characters, like the summary instruction, and only their length is written to the log, never their content. Since they are kept in the browser, on a shared computer the next user of the same browser can see them.
 
+### Saved instructions
+
+In the editor, any edited instruction can be saved under a name with **Spara som…** and picked again later from the **Sparade instruktioner** menu at the top of the editor; **Ta bort** deletes the one selected. This works for all four instructions - summary, follow-up questions, speakers and the custom analysis - and each has its own list, so a saved custom analysis such as "Beslutslista" does not appear among the speaker instructions.
+
+- Picking a saved instruction only fills in the field. **Klar** applies it as usual, and for **Anpassad** that is what checks the box.
+- Saving an existing name asks before replacing it. A text that is empty or equal to the standard text cannot be saved.
+- Up to 20 instructions per kind, with names of up to 60 characters.
+- The lists are kept in the browser's `localStorage` (`jbg_saved_prompts_summary`, `_questions`, `_speakers`, `_custom`), so they belong to one browser on one computer and are never sent to the server. Instructions the whole team should have belong in `policy/prompt_policy.json` instead.
+
 ### How long transcriptions are handled
 
 A summary is best when the model sees the whole transcription at once, so the

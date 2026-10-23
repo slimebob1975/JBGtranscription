@@ -294,7 +294,11 @@ form button:disabled:hover {
     transform: translateX(-50%);
     width: min(660px, calc(100% - 2rem));
     max-width: 660px;
-    /* A px cap, not vh: inside the iframe, vh is the full document height. */
+    /* A fixed px height, not vh: inside the iframe, vh is the full document
+       height. Fixed rather than a cap so that the text field, which takes the
+       space left over, gets smaller when the editor shows more rows (saved
+       instructions, the fixed opening) instead of pushing the buttons out. */
+    height: 520px;
     max-height: 520px;
     padding: 0;
     border: 1px solid #c3d0dc;
@@ -337,7 +341,7 @@ form button:disabled:hover {
     flex: 1 1 auto;
     width: 100%;
     box-sizing: border-box;
-    min-height: 330px;
+    min-height: 6rem;
     margin: 0;
     padding: 0.75rem 1rem;
     border: none;
@@ -351,6 +355,31 @@ form button:disabled:hover {
 #promptEditorText:focus {
     outline: 2px solid #005293;
     outline-offset: -2px;
+}
+
+/* Saved instructions: a menu at the top of the editor */
+.prompt-editor-saved {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid #e6ecf2;
+}
+
+.prompt-editor-saved[hidden] {
+    display: none;
+}
+
+.prompt-editor-saved select {
+    flex: 1 1 14rem;
+    min-width: 0;
+    max-width: 100%;
+    padding: 0.3rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background-color: #fff;
+    color: #333;
 }
 
 /* The fixed opening of the custom analysis: visibly part of the instruction,
@@ -380,6 +409,12 @@ form button:disabled:hover {
 
 .summary-editor-spacer {
     flex: 1 1 auto;
+}
+
+.prompt-editor-decision {
+    display: flex;
+    gap: 0.6rem;
+    margin-left: auto;
 }
 
 .summary-editor-actions button {

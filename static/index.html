@@ -117,15 +117,24 @@
             <h2 id="promptEditorTitle">Redigera promptinstruktioner</h2>
             <p id="promptEditorSubtitle" class="summary-editor-subtitle"></p>
         </div>
+        <!-- Instructions the user has saved under a name, in this browser only -->
+        <div id="promptEditorSaved" class="prompt-editor-saved" hidden>
+            <select id="savedPromptSelect" title="Instruktioner du har sparat i den här webbläsaren"></select>
+            <button type="button" id="deleteSavedPrompt" class="link-button" hidden>Ta bort</button>
+        </div>
         <!-- Fixed opening that cannot be edited; shown above the text field -->
         <p id="promptEditorPrefix" class="prompt-editor-prefix" hidden></p>
         <textarea id="promptEditorText" spellcheck="true"
                   title="Instruktionen till språkmodellen. Ändra texten om du vill ha något annat än standardtexten"></textarea>
         <div class="summary-editor-actions">
             <button type="button" id="resetPromptEditor" class="link-button" hidden>Återgå till standardtexten</button>
+            <button type="button" id="savePromptAs" class="link-button" title="Spara texten under ett namn, så att du kan välja den igen senare">Spara som…</button>
             <span class="summary-editor-spacer"></span>
-            <button type="button" id="cancelPromptEditor" class="secondary-button">Avbryt</button>
-            <button type="button" id="applyPromptEditor">Klar</button>
+            <!-- Kept together, so that on a narrow screen they wrap as a pair -->
+            <span class="prompt-editor-decision">
+                <button type="button" id="cancelPromptEditor" class="secondary-button">Avbryt</button>
+                <button type="button" id="applyPromptEditor">Klar</button>
+            </span>
         </div>
     </dialog>
     

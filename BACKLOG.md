@@ -38,8 +38,6 @@ The version number is kept only in `VERSION`, and each release is tagged
   "Intervjuperson 1 verkar orolig för att rutinerna inte fungerar". The
   transcript does not support inferences about a person's state of mind,
   and the subjects are identifiable staff in a supervisory file.
-- [ ] Let the user save their own edited instruction as a named option,
-  alongside the ones defined in the policy file.
 - [ ] Show an estimated segment count, and from it a cost, before upload. The
   page can read the audio duration before uploading; a typical speaking rate
   then gives an estimated token count, and the prices are now in
@@ -50,6 +48,12 @@ The version number is kept only in `VERSION`, and each release is tagged
 
 ## Solved
 
+- [X] Let the user save their own edited instructions under a name, for all
+  four editable instructions, each with its own list. Kept in the browser
+  only, by choice: nothing is stored on the server, and options for the
+  whole team still belong in the policy file. The editor dialog now has a
+  fixed height, so the text field shrinks rather than pushing the buttons
+  out when more rows are shown
 - [X] Let the user edit the instructions for follow-up questions and speaker
   identification, and add a custom analysis ("Anpassad") for recordings that
   are not interviews, such as meetings. One editor dialog now serves the

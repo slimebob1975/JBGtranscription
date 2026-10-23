@@ -227,6 +227,135 @@ const editorTargets = {
     },
 };
 
+// --- Saved instructions -------------------------------------------------------
+// A user can save an edited text under a name and pick it again later. Each
+// kind of instruction has its own list, kept in this browser only, so nothing
+// is stored on the server. Picking a saved text only fills in the field; Klar
+// applies it as usual.
+
+const SAVED_PROMPTS_KEY_PREFIX = "jbg_saved_prompts_";
+
+// Name of the saved text last picked, offered as the name when saving again.
+// Kept apart from the menu, which goes back to its placeholder as soon as the
+// field no longer holds that text.
+let lastPickedSavedName = "";
+const MAX_SAVED_PROMPTS = 20;
+const MAX_SAVED_PROMPT_NAME = 60;
+
+function savedPromptsFor(key) {
+    try {
+        const list = JSON.parse(localStorage.getItem(SAVED_PROMPTS_KEY_PREFIX + key) || "[]");
+        return Array.isArray(list)
+            ? list.filter(e => e && typeof e.name === "string" && typeof e.text === "string")
+            : [];
+    } catch (err) {
+        return [];
+    }
+}
+
+function storeSavedPrompts(key, list) {
+    try {
+        if (list.length) {
+            localStorage.setItem(SAVED_PROMPTS_KEY_PREFIX + key, JSON.stringify(list));
+        } else {
+            localStorage.removeItem(SAVED_PROMPTS_KEY_PREFIX + key);
+        }
+        return true;
+    } catch (err) {
+        console.warn("Kunde inte spara instruktionen lokalt:", err);
+        return false;
+    }
+}
+
+function refreshSavedPrompts(selectedName = "") {
+    const key = activeEditorKey;
+    const area = document.getElementById("promptEditorSaved");
+    const select = document.getElementById("savedPromptSelect");
+    const list = key ? savedPromptsFor(key) : [];
+
+    area.hidden = list.length === 0;
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = `Sparade instruktioner (${list.length})`;
+    select.replaceChildren(placeholder, ...list.map(entry => {
+        const option = document.createElement("option");
+        option.value = entry.name;
+        option.textContent = entry.name;
+        return option;
+    }));
+    select.value = list.some(e => e.name === selectedName) ? selectedName : "";
+    document.getElementById("deleteSavedPrompt").hidden = select.value === "";
+}
+
+function saveCurrentPromptAs() {
+    const key = activeEditorKey;
+    const target = activeEditorTarget;
+    if (!key || !target) return;
+    const text = document.getElementById("promptEditorText").value.trim();
+
+    if (!text || text === target.standard().trim()) {
+        alert("Det finns ingen egen text att spara. Skriv eller ändra texten först.");
+        return;
+    }
+
+    const answer = prompt("Ge instruktionen ett namn:", lastPickedSavedName);
+    const name = (answer || "").trim().slice(0, MAX_SAVED_PROMPT_NAME);
+    if (!name) return;
+
+    const list = savedPromptsFor(key);
+    const existing = list.find(e => e.name === name);
+    if (existing) {
+        if (!confirm(`Det finns redan en sparad instruktion som heter ”${name}”. Vill du ersätta den?`)) return;
+        existing.text = text;
+    } else {
+        if (list.length >= MAX_SAVED_PROMPTS) {
+            alert(`Du kan spara högst ${MAX_SAVED_PROMPTS} instruktioner av det här slaget. Ta bort någon först.`);
+            return;
+        }
+        list.push({ name, text });
+        list.sort((a, b) => a.name.localeCompare(b.name, "sv"));
+    }
+    if (storeSavedPrompts(key, list)) {
+        lastPickedSavedName = name;
+        refreshSavedPrompts(name);
+    }
+}
+
+// The menu shows a name only while the field holds exactly that saved text.
+// Once the text is reset, cleared or edited, the menu goes back to its
+// placeholder, so the same name can be picked again in one step - picking
+// the option already shown would not fire a change.
+function releaseSavedPromptSelection() {
+    const select = document.getElementById("savedPromptSelect");
+    if (!select.value || !activeEditorKey) return;
+    const entry = savedPromptsFor(activeEditorKey).find(e => e.name === select.value);
+    const text = document.getElementById("promptEditorText").value;
+    if (!entry || entry.text !== text) {
+        select.value = "";
+        document.getElementById("deleteSavedPrompt").hidden = true;
+    }
+}
+
+function loadSelectedSavedPrompt() {
+    const name = document.getElementById("savedPromptSelect").value;
+    document.getElementById("deleteSavedPrompt").hidden = name === "";
+    if (!name) return;
+    const entry = savedPromptsFor(activeEditorKey).find(e => e.name === name);
+    if (!entry) return;
+    const textarea = document.getElementById("promptEditorText");
+    textarea.value = entry.text;
+    lastPickedSavedName = entry.name;
+    refreshEditorReset();
+    textarea.focus();
+}
+
+function deleteSelectedSavedPrompt() {
+    const name = document.getElementById("savedPromptSelect").value;
+    if (!name || !confirm(`Ta bort den sparade instruktionen ”${name}”? Texten i fältet ändras inte.`)) return;
+    storeSavedPrompts(activeEditorKey, savedPromptsFor(activeEditorKey).filter(e => e.name !== name));
+    refreshSavedPrompts();
+}
+
 // --- Floating editor ---------------------------------------------------------
 // The instruction is edited in a <dialog> so that showing it never changes the
 // height of the page. Native showModal() is used for the focus trap, the
@@ -234,6 +363,7 @@ const editorTargets = {
 // centres on the iframe's own viewport rather than what the user can see.
 
 let activeEditorTarget = null;      // the entry of editorTargets being edited
+let activeEditorKey = null;         // its key: summary, questions, speakers, custom
 let latestParentPageInfo = null;    // from iframe-resizer, when embedded
 
 function trackParentPageInfo() {
@@ -290,6 +420,8 @@ function openPromptEditor(key) {
     const textarea = document.getElementById("promptEditorText");
 
     activeEditorTarget = target;
+    activeEditorKey = key;
+    lastPickedSavedName = "";
     document.getElementById("promptEditorTitle").textContent = target.title;
 
     const subtitle = document.getElementById("promptEditorSubtitle");
@@ -303,6 +435,7 @@ function openPromptEditor(key) {
     textarea.maxLength = summaryPromptMaxLength;
     textarea.value = target.text();
     refreshEditorReset();
+    refreshSavedPrompts();
 
     if (typeof dialog.showModal === "function") {
         dialog.showModal();
@@ -320,6 +453,7 @@ function closePromptEditor(apply) {
     const textarea = document.getElementById("promptEditorText");
     const target = activeEditorTarget;
     activeEditorTarget = null;
+    activeEditorKey = null;
 
     if (target) {
         if (apply) {
@@ -351,10 +485,15 @@ function setUpPromptEditorDialog() {
     document.getElementById("cancelPromptEditor")
         .addEventListener("click", () => closePromptEditor(false));
 
+    document.getElementById("savePromptAs").addEventListener("click", saveCurrentPromptAs);
+    document.getElementById("savedPromptSelect").addEventListener("change", loadSelectedSavedPrompt);
+    document.getElementById("deleteSavedPrompt").addEventListener("click", deleteSelectedSavedPrompt);
+
     document.getElementById("resetPromptEditor").addEventListener("click", () => {
         if (!activeEditorTarget) return;
         textarea.value = activeEditorTarget.standard();
         refreshEditorReset();
+        releaseSavedPromptSelection();
         textarea.focus();
     });
 
@@ -363,6 +502,7 @@ function setUpPromptEditorDialog() {
             textarea.value = textarea.value.slice(0, summaryPromptMaxLength);
         }
         refreshEditorReset();
+        releaseSavedPromptSelection();
     });
 
     // Esc means the same here as everywhere else: discard and close.
