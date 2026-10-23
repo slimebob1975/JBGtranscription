@@ -22,6 +22,7 @@ from src.JBGtranscriber import (
     ENGINE_FASTER_WHISPER,
     ENGINE_TRANSFORMERS,
     SUPPORTED_AUDIO_EXTENSIONS,
+    TRANSCRIPTION_CACHE_DIR,
 )
 from src.JBGSecureFileHandler import SecureFileHandler
 from src.JBGBuildInfo import get_build_info
@@ -77,39 +78,50 @@ jobs = {}
 # that several instances can share, and a restarting instance must not delete
 # an upload that another one is still transcribing.
 DEFAULT_RETENTION_HOURS = 24
+# Cached transcriptions of unencrypted uploads, in clear text, have a setting
+# of their own. Deleting one early is harmless: the next upload of the same
+# file is simply transcribed again.
+DEFAULT_CACHE_RETENTION_HOURS = 24
+MIN_CACHE_RETENTION_HOURS = 1
 # Must exceed the longest job. startup.sh lets Gunicorn run one for up to two
 # hours (--timeout 7200), so a lower setting is raised to this.
 MIN_RETENTION_HOURS = 3
 CLEANUP_INTERVAL_SECONDS = 3600
 
 
-def read_retention_hours() -> int:
-    """Read JBG_RETENTION_HOURS, falling back to the default and enforcing the minimum."""
-    raw = os.getenv("JBG_RETENTION_HOURS", "").strip()
+def _read_hours(name: str, default: int, minimum: int, reason: str) -> int:
+    """Read a whole number of hours from the environment, with a default and a minimum."""
+    raw = os.getenv(name, "").strip()
     if not raw:
-        return DEFAULT_RETENTION_HOURS
+        return default
     try:
         hours = int(raw)
     except ValueError:
-        logger.warning(
-            f"JBG_RETENTION_HOURS={raw!r} är inte ett heltal. "
-            f"Använder {DEFAULT_RETENTION_HOURS} timmar."
-        )
-        return DEFAULT_RETENTION_HOURS
-    if hours < MIN_RETENTION_HOURS:
-        logger.warning(
-            f"JBG_RETENTION_HOURS={hours} är kortare än det längsta jobbet. "
-            f"Använder {MIN_RETENTION_HOURS} timmar."
-        )
-        return MIN_RETENTION_HOURS
+        logger.warning(f"{name}={raw!r} är inte ett heltal. Använder {default} timmar.")
+        return default
+    if hours < minimum:
+        logger.warning(f"{name}={hours} är {reason}. Använder {minimum} timmar.")
+        return minimum
     return hours
 
 
-def remove_stale_files(max_age_seconds: float, now: float = None) -> int:
-    """Delete files in uploads/ and results/ last modified more than max_age_seconds ago."""
+def read_retention_hours() -> int:
+    """Read JBG_RETENTION_HOURS, falling back to the default and enforcing the minimum."""
+    return _read_hours("JBG_RETENTION_HOURS", DEFAULT_RETENTION_HOURS,
+                       MIN_RETENTION_HOURS, "kortare än det längsta jobbet")
+
+
+def read_cache_retention_hours() -> int:
+    """Read JBG_CACHE_RETENTION_HOURS, falling back to the default and enforcing the minimum."""
+    return _read_hours("JBG_CACHE_RETENTION_HOURS", DEFAULT_CACHE_RETENTION_HOURS,
+                       MIN_CACHE_RETENTION_HOURS, "för kort")
+
+
+def remove_stale_files(max_age_seconds: float, now: float = None, folders=None) -> int:
+    """Delete files in the folders (uploads/ and results/ by default) older than max_age_seconds."""
     now = time.time() if now is None else now
     removed = 0
-    for folder in (UPLOAD_FOLDER, RESULTS_FOLDER):
+    for folder in folders or (UPLOAD_FOLDER, RESULTS_FOLDER):
         try:
             entries = list(folder.iterdir())
         except FileNotFoundError:
@@ -139,25 +151,30 @@ def prune_jobs(max_age_seconds: float, now: float = None) -> int:
     return pruned
 
 
-def run_cleanup(retention_hours: int):
+def run_cleanup(retention_hours: int, cache_retention_hours: int = DEFAULT_CACHE_RETENTION_HOURS):
     max_age_seconds = retention_hours * 3600
     removed = remove_stale_files(max_age_seconds)
     pruned = prune_jobs(max_age_seconds)
+    cached = remove_stale_files(cache_retention_hours * 3600, folders=(TRANSCRIPTION_CACHE_DIR,))
     if removed or pruned:
         logger.info(
             f"Rensning: {removed} filer äldre än {retention_hours} timmar raderade, "
             f"{pruned} gamla jobb borttagna ur minnet."
         )
+    if cached:
+        logger.info(f"Rensning: {cached} cachade transkriberingar äldre än {cache_retention_hours} timmar raderade.")
 
 
 async def cleanup_loop():
     """Run the cleanup at startup and then once per interval, off the event loop."""
     # Read here rather than at import, so that load_dotenv() has run.
     retention_hours = read_retention_hours()
+    cache_retention_hours = read_cache_retention_hours()
     logger.info(f"Filer i uploads/ och results/ raderas när de är äldre än {retention_hours} timmar.")
+    logger.info(f"Cachade transkriberingar raderas när de är äldre än {cache_retention_hours} timmar.")
     while True:
         try:
-            await asyncio.to_thread(run_cleanup, retention_hours)
+            await asyncio.to_thread(run_cleanup, retention_hours, cache_retention_hours)
         except Exception as e:
             logger.warning(f"Rensningen av gamla filer misslyckades: {e}")
         await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)

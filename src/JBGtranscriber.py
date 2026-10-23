@@ -27,8 +27,14 @@ from src.JBGLogger import JBGLogger
 from src.JBGBuildInfo import get_build_info
     
 # Default markers
+CACHE_MODEL_MARKER = "===MODEL==="
 CACHE_TRANSCRIPTION_MARKER = "===TRANSCRIPTION==="
 CACHE_TIMESTAMPED_MARKER = "===TIMESTAMPED==="
+
+# Transcriptions of unencrypted uploads are kept here so that the same audio
+# file uploaded again goes straight to the analysis steps. The files are
+# clear text; main.py deletes them after JBG_CACHE_RETENTION_HOURS.
+TRANSCRIPTION_CACHE_DIR = Path("cache")
 MODEL_GPT_5_MARKER = "gpt-5"
 
 # --- Segmentation of long transcriptions -------------------------------------
@@ -442,6 +448,8 @@ class JBGtranscriber():
         self.current_task = ""
         # Filled in once a model has actually loaded and transcribed.
         self.transcriber_model_used = ""
+        # True when the transcription was taken from the cache.
+        self.transcription_from_cache = False
         self.prompt_policy = self.load_prompt_policy()
         self.summary = ""
         self.marked_text = ""
@@ -661,11 +669,50 @@ class JBGtranscriber():
             return ApproximateEncoder()
 
     def get_transcription_cache_path(self):
-        """Generate a cache filename based on the audio file's full path (hashed)."""
+        """Cache file for this audio content, accuracy level and engine.
+
+        The key is the content, not the name, so a renamed copy still hits.
+        Accuracy and engine are part of it so that a request for higher
+        accuracy is never answered with an earlier, less accurate result.
+        """
         with open(self.convert_path, "rb") as f:
             file_hash = hashlib.md5(f.read()).hexdigest()
-        cache_file = Path("cache") / f"{file_hash}.txt"
-        return cache_file
+        return TRANSCRIPTION_CACHE_DIR / (
+            f"{file_hash}_{self.transcription_accuracy}_{self.transcription_engine}.txt"
+        )
+
+    def _read_transcription_cache(self, cache_file):
+        """Load a cached transcription; returns False if there is none."""
+        if not cache_file.exists():
+            return False
+        content = cache_file.read_text(encoding="utf-8")
+        model_used, device = "", ""
+        if content.startswith(CACHE_MODEL_MARKER):
+            header, _, content = content.partition(CACHE_TRANSCRIPTION_MARKER)
+            lines = header[len(CACHE_MODEL_MARKER):].strip().splitlines()
+            model_used = lines[0].strip() if lines else ""
+            device = lines[1].strip() if len(lines) > 1 else ""
+        parts = content.split(CACHE_TIMESTAMPED_MARKER)
+        self.transcription = parts[0].replace(CACHE_TRANSCRIPTION_MARKER, "").strip()
+        self.transcription_w_timestamps = parts[1].strip() if len(parts) > 1 else ""
+        self.transcriber_model_used = model_used
+        self.transcription_device = device
+        self.transcription_from_cache = True
+        logger.info(f" Using cached transcription: {cache_file.name} (model {model_used or 'okänd'})")
+        return True
+
+    def _write_transcription_cache(self, cache_file):
+        """Store the transcription, with the model that produced it."""
+        TRANSCRIPTION_CACHE_DIR.mkdir(exist_ok=True)
+        with open(cache_file, "w", encoding="utf-8") as f:
+            f.write(f"{CACHE_MODEL_MARKER}\n")
+            f.write(f"{self.transcriber_model_used}\n")
+            f.write(f"{self.transcription_device}\n")
+            f.write(f"{CACHE_TRANSCRIPTION_MARKER}\n")
+            f.write(self.transcription + "\n")
+            f.write(f"\n{CACHE_TIMESTAMPED_MARKER}\n")
+            f.write(self.transcription_w_timestamps)
+        logger.info(f" Transcription and timestamps cached as: {cache_file.name}")
     
     @staticmethod
     def _is_unsupported_parameter_error(error):
@@ -1704,18 +1751,9 @@ class JBGtranscriber():
     def transcribe_default(self):
         """Put together the model of choice and do the transcription"""
     
-        # Ensure cache directory exists
-        Path("cache").mkdir(exist_ok=True)
-
         # Check cache
         cache_file = self.get_transcription_cache_path()
-        if cache_file.exists():
-            logger.info(f" Using cached transcription: {cache_file.name}")
-            with open(cache_file, "r", encoding="utf-8") as f:
-                content = f.read()
-                parts = content.split(CACHE_TIMESTAMPED_MARKER)
-                self.transcription = parts[0].replace(CACHE_TRANSCRIPTION_MARKER, "").strip()
-                self.transcription_w_timestamps = parts[1].strip() if len(parts) > 1 else ""
+        if self._read_transcription_cache(cache_file):
             return
     
         # What model to use
@@ -1744,14 +1782,8 @@ class JBGtranscriber():
                 return_timestamps=True)
         
         self.transcription, self.transcription_w_timestamps = self._postprocess_result(result)
-        
-        with open(cache_file, "w", encoding="utf-8") as f:
-            f.write(f"{CACHE_TRANSCRIPTION_MARKER}\n")
-            f.write(self.transcription + "\n")
-            f.write(f"\n{CACHE_TIMESTAMPED_MARKER}\n")
-            f.write(self.transcription_w_timestamps)
-        
-        logger.info(f" Transcription and timestamps cached as: {cache_file.name}")
+        self.transcriber_model_used = self.transcriber_model_id
+        self._write_transcription_cache(cache_file)
     
     @staticmethod
     def _enough_memory(min_gb_required: float = 6.0) -> bool:
@@ -1773,15 +1805,7 @@ class JBGtranscriber():
 
         # The option to use cached transcription is not available during encrypted mode
         if not self.secure_handler:
-            Path("cache").mkdir(exist_ok=True)
-            cache_file = self.get_transcription_cache_path()
-            if cache_file.exists():
-                logger.info(f" Using cached transcription: {cache_file.name}")
-                with open(cache_file, "r", encoding="utf-8") as f:
-                    content = f.read()
-                    parts = content.split(CACHE_TIMESTAMPED_MARKER)
-                    self.transcription = parts[0].replace(CACHE_TRANSCRIPTION_MARKER, "").strip()
-                    self.transcription_w_timestamps = parts[1].strip() if len(parts) > 1 else ""
+            if self._read_transcription_cache(self.get_transcription_cache_path()):
                 return
         else:
             logger.warning(f" Cannot use cached transcriptions and encryption as the same time")
@@ -1888,14 +1912,7 @@ class JBGtranscriber():
 
                 
                 if not self.secure_handler:
-                    cache_file = self.get_transcription_cache_path()
-                    with open(cache_file, "w", encoding="utf-8") as f:
-                        f.write(f"{CACHE_TRANSCRIPTION_MARKER}\n")
-                        f.write(self.transcription + "\n")
-                        f.write(f"\n{CACHE_TIMESTAMPED_MARKER}\n")
-                        f.write(self.transcription_w_timestamps)
-
-                    logger.info(f" Transcription and timestamps cached as: {cache_file.name}")
+                    self._write_transcription_cache(self.get_transcription_cache_path())
                 return
 
             except Exception as e:
@@ -2255,6 +2272,8 @@ class JBGtranscriber():
                 f" Den valda nivån motsvarar {wanted}, men tillgängligt minne "
                 "räckte inte, så en mindre modell användes i stället."
             )
+        if self.transcription_from_cache:
+            line += " Transkriberingen återanvändes från en tidigare körning av samma ljudfil."
         return line + "\n\n" + f"Programversion: {JBGtranscriber._program_version()}."
 
     @staticmethod

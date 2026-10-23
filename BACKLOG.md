@@ -50,6 +50,14 @@ The version number is kept only in `VERSION`, and each release is tagged
 
 ## Solved
 
+- [X] Give cached transcriptions a lifetime. With encryption off,
+  transcriptions were cached in `cache/` but never deleted, so every
+  unencrypted transcription stayed on the server in clear text. They are now
+  deleted after `JBG_CACHE_RETENTION_HOURS` (24 by default, at least 1) by the
+  hourly cleanup. The cache key now includes the accuracy level and engine,
+  so a request for higher accuracy is no longer answered from an earlier,
+  less accurate run, and the cache file records the model used, so "Om
+  transkriberingen" is no longer left out on a cache hit and notes the reuse
 - [X] Accept other audio formats than mp3: mp3, m4a, wav, aac, flac and ogg,
   listed in `SUPPORTED_AUDIO_EXTENSIONS`. Video containers are left out on
   purpose. The page and the server check the extension, the upload keeps its

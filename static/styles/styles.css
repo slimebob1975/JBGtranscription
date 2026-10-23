@@ -63,6 +63,18 @@ input[type="file"] {
 }
 
 /* === Knappar === */
+/* One size for everything you choose or click with: labels, form controls
+   and buttons all use the base size of the page. Form controls do not
+   inherit the page font unless told to, and would otherwise be about 13 px.
+   Helper and status text (the version line, the prompt state, the footer)
+   is deliberately smaller and keeps its own size. */
+input,
+select,
+textarea,
+button {
+    font: inherit;
+}
+
 button {
     padding: 10px 20px;
     /* background-color: #2979be; */ /* Tidigare */
@@ -70,7 +82,6 @@ button {
     color: white;
     border: none;
     border-radius: 4px;
-    font-size: 14px;
     cursor: pointer;
     transition: background-color 0.2s ease, box-shadow 0.2s ease;
 }
@@ -127,6 +138,10 @@ form button:disabled:hover {
     /* background-color: #f9f9f9; */ /* Tidigare */
     background-color: #fafafa;
     max-width: var(--content-width);
+    /* A fieldset never shrinks below its content by default. Without this, a
+       wide control or a long label made one panel wider than the others on a
+       narrow phone, and the page scrolled sideways. */
+    min-width: 0;
 }
 
 /* === Gemensam innehållsspalt ===
@@ -169,8 +184,29 @@ form button:disabled:hover {
 }
 
 #fastEngineLabel {
-    font-size: 0.9rem;
     color: #333;
+    white-space: nowrap;
+}
+
+/* === Filväljare och kryptering på samma rad === */
+.upload-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.upload-row input[type="file"] {
+    margin-bottom: 0;
+    /* At the full font size the file selector is about 300 px wide, more
+       than a panel on a narrow phone. Let it shrink to the panel; the browser
+       then shortens the "no file chosen" text. */
+    min-width: 0;
+    max-width: 100%;
+}
+
+#encryptionLabel {
     white-space: nowrap;
 }
 
@@ -182,9 +218,7 @@ form button:disabled:hover {
 .transcription-format-choice label {
     display: block;
     margin-bottom: 0.1rem;
-    font-size: 0.9rem;
     color: #333;
-    white-space: nowrap;
 }
 
 /* === Redigerbar sammanfattningsinstruktion === */
@@ -205,7 +239,6 @@ form button:disabled:hover {
 .summary-style-choice label {
     display: block;
     margin-bottom: 0.25rem;
-    font-size: 0.85rem;
     color: #555;
 }
 
@@ -216,8 +249,6 @@ form button:disabled:hover {
     padding: 0.35rem;
     border: 1px solid #ccc;
     border-radius: 4px;
-    font-family: inherit;
-    font-size: 0.9rem;
     color: #333;
     background-color: #fff;
 }
@@ -243,7 +274,6 @@ form button:disabled:hover {
 .summary-options > label[for="summaryPrompt"] {
     display: block;
     margin-bottom: 0.35rem;
-    font-size: 0.85rem;
     color: #555;
 }
 
@@ -312,8 +342,6 @@ form button:disabled:hover {
     padding: 0.75rem 1rem;
     border: none;
     border-radius: 0;
-    font-family: inherit;
-    font-size: 0.85rem;
     line-height: 1.5;
     color: #333;
     background-color: #fff;
@@ -376,7 +404,6 @@ form button:disabled:hover {
     background: none;
     border: none;
     color: #005293;
-    font-size: 0.8rem;
     text-decoration: underline;
     cursor: pointer;
 }

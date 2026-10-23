@@ -22,11 +22,12 @@
         <!-- File selector -->
         <fieldset class="settings-panel" id="upload-options">
             <legend><h4>Ladda upp din ljudfil</h4></legend>
+            <div class="upload-row">
             <input type="file" id="audioFile" accept=".mp3,.m4a,.wav,.aac,.flac,.ogg" title="Ladda upp en ljudfil: mp3, m4a, wav, aac, flac eller ogg">
-            <label>
-                <input type="checkbox" id="enableEncryption" title="Ljudfilen och det färdiga dokumentet sparas krypterade på servern" checked>
-                Använd kryptering (rekommenderas)
+            <label id="encryptionLabel" title="Ljudfilen och det färdiga dokumentet sparas krypterade på servern. Rekommenderas.">
+                <input type="checkbox" id="enableEncryption" checked> Kryptering
             </label>
+            </div>
         </fieldset>
 
         <!-- Transcription settings -->

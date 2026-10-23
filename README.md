@@ -567,6 +567,20 @@ The value must be a whole number of hours. A value below 3 is raised to 3, since
 
 Files are selected by age only. The folders are never emptied wholesale, because several instances can share the same disk, and one that restarts must not delete an upload that another is still working on.
 
+### Cached transcriptions
+
+With encryption off, every transcription is saved in `cache/`, so that uploading the same audio file again skips the transcription and goes straight to the analysis steps. The cache file is named after the content of the audio file, the accuracy level and the engine. A renamed copy of the same recording therefore still hits the cache, while a request for higher accuracy or the other engine is transcribed again rather than answered with an earlier, less accurate result. The audio file itself is never kept. On a cache hit, "Om transkriberingen" in the result document notes that the transcription was reused.
+
+`JBG_CACHE_RETENTION_HOURS` sets how long a cached transcription is kept, counted from when it was made:
+
+```env
+JBG_CACHE_RETENTION_HOURS=24
+```
+
+The default is 24 hours and the minimum is 1. The files are deleted by the same cleanup as above, at startup and then once an hour. They hold the transcription in clear text, so keep the value no longer than needed.
+
+With encryption on, the cache is neither read nor written.
+
 ### Version
 
 The page shows the version under the title, e.g. "Version 1.1.0 · a1b2c3d (prod)", with the commit linking to GitHub. The same information appears as "Programversion" in the "Om transkriberingen" section of every result document, so a result can be traced to the code that produced it.
@@ -664,6 +678,7 @@ The application uses its local `results/` directory as temporary result storage 
 - The AES key exists only in the current browser page session. Reloading or closing the page before the automatic download loses that key; an encrypted result left on the server would then require cleanup rather than recovery through the GUI.
 - The stored result file is deleted after the download response has finished streaming.
 - A server cannot reliably know that the browser ultimately saved a file to the user's filesystem; it can only know that the full HTTP response was delivered.
+- With encryption off, transcriptions are kept in clear text in `cache/` for `JBG_CACHE_RETENTION_HOURS` (24 hours by default), so that the same file can be analysed again without a new transcription. With encryption on, nothing is cached.
 - Interrupted processing or failed downloads can leave files in `uploads/` or `results/`. The application deletes them once they are older than `JBG_RETENTION_HOURS` (24 hours by default), so such a file can stay on disk for up to that long plus one hour.
 - Set `ENCRYPTION_IS_OPTIONAL=0` when plaintext server-side result files must never be permitted by application configuration.
 - The OpenAI API key is not intentionally stored server-side.
