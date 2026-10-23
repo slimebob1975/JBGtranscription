@@ -26,6 +26,7 @@ from src.JBGtranscriber import (
 )
 from src.JBGSecureFileHandler import SecureFileHandler
 from src.JBGBuildInfo import get_build_info
+from src.JBGModelPrices import get_price_table, price_for, validate_price_table
 from pathlib import Path
 import torch
 from src.JBGLogger import JBGLogger
@@ -37,6 +38,9 @@ logger = JBGLogger(level="DEBUG").logger
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # The price file is read once per process, so it is checked at every start.
+    for warning in validate_price_table():
+        logger.warning(f"Prisfilen: {warning}")
     # The cleanup loop is defined further down; it runs for as long as the app.
     cleanup_task = asyncio.create_task(cleanup_loop())
     try:
@@ -394,6 +398,11 @@ def get_config():
         "encryption_is_optional": encryption_is_optional,
         "version": get_build_info(),
         "audio_extensions": list(SUPPORTED_AUDIO_EXTENSIONS),
+        "models": get_price_table()["menu"],
+        "default_model": get_price_table()["default"],
+        # Price per million tokens for each menu model, shown in the menu.
+        "model_prices": {m: price_for(m) for m in get_price_table()["menu"] if price_for(m)},
+        "currency": get_price_table()["currency"],
         "max_upload_mb": read_max_upload_mb(),
     }
 
@@ -434,7 +443,7 @@ async def upload_audio(
     file: UploadFile = File(...),
     encryption_key: str = Form(""),
     api_key: str = Form(...),
-    model: str = Form("gpt-4o"),
+    model: str = Form(""),
     summarize: bool = Form(False),
     summary_style: str = Form(""),
     summary_prompt: str = Form(""),
@@ -460,6 +469,12 @@ async def upload_audio(
             logger.info("encryption_key verkar vara giltig base64 och 256 bitar lång")
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid encryption key.")
+
+    # Only models offered in the menu, all of which have a price. Empty means
+    # the default, for requests that do not come from the page.
+    model = model.strip() or get_price_table()["default"]
+    if model not in get_price_table()["menu"]:
+        raise HTTPException(status_code=400, detail=f"Unknown model: {model}")
 
     extension = audio_extension(file.filename)
     if extension is None:

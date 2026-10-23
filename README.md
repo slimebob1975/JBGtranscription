@@ -79,9 +79,11 @@ After the HTTP response has finished streaming, the server-side result file is d
 ├── src/
 │   ├── JBGtranscriber.py           # Transcription, analysis and DOCX generation
 │   ├── JBGSecureFileHandler.py     # AES-GCM handling for audio and DOCX results
+│   ├── JBGModelPrices.py           # Model menu, prices and cost calculation
 │   └── JBGLogger.py                # Logging
 ├── policy/
-│   └── prompt_policy.json          # OpenAI prompt configuration
+│   ├── prompt_policy.json          # OpenAI prompt configuration
+│   └── model_prices.json           # Models in the menu and their prices
 ├── static/
 │   ├── index.html                  # Web frontend
 │   ├── styles/styles.css           # Frontend styling
@@ -184,13 +186,15 @@ The web interface can encrypt the uploaded audio and the generated DOCX result w
 
 In order: the transcribed text in the chosen form, then the analyses that were
 asked for, then two closing sections. **Om transkriberingen** names the Whisper
-model that actually ran, and **Statistik** is a table of what the run cost:
+model that actually ran, the estimated cost of the OpenAI calls and the program
+version, and **Statistik** is a table of what the run cost:
 
-| Moment | Modell | Anrop | Tokens in | Tokens ut | Tid |
-| --- | --- | --- | --- | --- | --- |
+| Moment | Modell | Anrop | Tokens in | Tokens ut | Tid | Kostnad (USD) |
+| --- | --- | --- | --- | --- | --- | --- |
 
-One row per moment, plus a total. Only counts and timings are recorded, never
-any part of the text. The section is left out when no model ran.
+One row per moment, plus a total. Only counts, timings and costs are recorded,
+never any part of the text. The section is left out when no model ran. How the
+cost is calculated is described under *Models and prices*.
 
 ### Logging
 
@@ -580,6 +584,20 @@ JBG_CACHE_RETENTION_HOURS=24
 The default is 24 hours and the minimum is 1. The files are deleted by the same cleanup as above, at startup and then once an hour. They hold the transcription in clear text, so keep the value no longer than needed.
 
 With encryption on, the cache is neither read nor written.
+
+### Models and prices
+
+`policy/model_prices.json` lists the OpenAI models and their prices per million tokens, in three parts: `in` for input, `cachad` for input read from OpenAI's prompt cache, and `ut` for output. The cached part matters: most input in a long run is usually cached, and charging it at the full price would overstate the cost several times over. Reasoning tokens are part of the output and are charged as such.
+
+Three keys control the application:
+
+- `_i_menyn`: the models offered in the menu, in order. The page builds the menu from this list, and the server rejects any other model, so a model cannot be chosen without a price. Each option shows the input and output price per million tokens, e.g. "gpt-5.2 (indata: 1,75, utdata: 14)", with the currency in the label and the cached price in the option's tooltip.
+- `_standardmodell`: the model selected by default.
+- `_kontrollerad`: the date (YYYY-MM-DD) the prices were last checked against OpenAI's price list.
+
+OpenAI has no API for prices, so they are entered by hand. The file is read when the application starts, and the log then warns about a model in the menu without a price, an incomplete price, and a check date that is missing or older than 90 days. After changing the file, restart the application.
+
+The cost of each call is calculated from the token counts OpenAI reports for it, and is shown per row in **Statistik** and as a total in **Om transkriberingen**, together with the check date. It is an estimate from list prices: it does not include charges that are not reported per call, and the invoice can differ. If any call used a model without a price, no total is given rather than a partial one.
 
 ### Version
 

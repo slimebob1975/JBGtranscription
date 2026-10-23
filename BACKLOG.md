@@ -43,13 +43,24 @@ The version number is kept only in `VERSION`, and each release is tagged
   the summary prompt editor.
 - [ ] Let the user save their own edited instruction as a named option,
   alongside the ones defined in the policy file.
-- [ ] Show an estimated cost or segment count before upload, now that the
-  segment count is predictable from the transcription length.
+- [ ] Show an estimated segment count, and from it a cost, before upload. The
+  page can read the audio duration before uploading; a typical speaking rate
+  then gives an estimated token count, and the prices are now in
+  `policy/model_prices.json`. It is an estimate with a margin and should be
+  presented as one.
 - [ ] Investigate if batching and moving window can improve execution time for the transcription step without big loss of accuracy
 - [ ] Investigare if a faster-Whisper model can improve execution time without big loss of accuracy
 
 ## Solved
 
+- [X] Show the cost of the OpenAI calls in the result document. Prices per
+  model are kept in `policy/model_prices.json`, with input, cached input and
+  output priced separately, since most input in a long run is cached. The
+  cost is computed from the token counts OpenAI reports for each call, shown
+  per row in "Statistik" and as a total in "Om transkriberingen". The same
+  file now defines the model menu (`_i_menyn`, `_standardmodell`), the server
+  rejects models outside it, and the startup log warns about missing prices
+  and a check date (`_kontrollerad`) that is missing or older than 90 days
 - [X] Give cached transcriptions a lifetime. With encryption off,
   transcriptions were cached in `cache/` but never deleted, so every
   unencrypted transcription stayed on the server in clear text. They are now

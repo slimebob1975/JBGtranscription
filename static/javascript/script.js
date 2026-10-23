@@ -342,6 +342,34 @@ function showVersion(version) {
   line.hidden = false;
 }
 
+// The model menu comes from policy/model_prices.json through /config, so a
+// model can only be offered if it has a price. Each option shows the input
+// and output price per million tokens, with the currency in the label to
+// keep the options short on a phone; the tooltip adds the cached price.
+const priceFormat = new Intl.NumberFormat("sv-SE", { maximumFractionDigits: 4 });
+
+function fillModelMenu(models, defaultModel, prices = {}, currency = "USD") {
+  const select = document.getElementById("modelSelect");
+  if (!select || !Array.isArray(models) || !models.length) return;
+  const currencyLabel = document.getElementById("modelPriceCurrency");
+  if (currencyLabel) currencyLabel.textContent = currency;
+  select.replaceChildren(...models.map(name => {
+    const option = document.createElement("option");
+    const price = prices && prices[name];
+    option.value = name;
+    option.textContent = price
+      ? `${name} (indata: ${priceFormat.format(price.in)}, utdata: ${priceFormat.format(price.ut)})`
+      : name;
+    if (price) {
+      option.title = `Per miljon tokens: indata ${priceFormat.format(price.in)} ${currency}, ` +
+        `cachad indata ${priceFormat.format(price.cachad)} ${currency}, ` +
+        `utdata ${priceFormat.format(price.ut)} ${currency}`;
+    }
+    option.selected = name === defaultModel;
+    return option;
+  }));
+}
+
 fetch("/config")
   .then(res => res.json())
   .then(data => {
@@ -355,6 +383,7 @@ fetch("/config")
     if (data.max_upload_mb > 0) {
       maxUploadMb = data.max_upload_mb;
     }
+    fillModelMenu(data.models, data.default_model, data.model_prices, data.currency);
     const checkbox = document.getElementById('enableEncryption');
     if (data.encryption_is_optional === "1") {
       checkbox.disabled = false;

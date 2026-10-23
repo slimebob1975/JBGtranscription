@@ -25,6 +25,7 @@ except ModuleNotFoundError as ex:
     sys.exit("You probably need to install some missing modules:" + str(ex))
 from src.JBGLogger import JBGLogger
 from src.JBGBuildInfo import get_build_info
+from src.JBGModelPrices import call_cost, format_cost, get_price_table
     
 # Default markers
 CACHE_MODEL_MARKER = "===MODEL==="
@@ -784,6 +785,8 @@ class JBGtranscriber():
             sent=getattr(usage, "prompt_tokens", None),
             received=getattr(usage, "completion_tokens", None),
             seconds=time.time() - started,
+            # Part of prompt_tokens, but billed at the much lower cache price.
+            cached=getattr(getattr(usage, "prompt_tokens_details", None), "cached_tokens", None),
         )
 
         choice = completion.choices[0]
@@ -2157,7 +2160,7 @@ class JBGtranscriber():
             paragraph = document.add_paragraph()
             JBGtranscriber._add_inline_word_markup(paragraph, stripped)
 
-    def _record_model_call(self, task, model, sent, received, seconds):
+    def _record_model_call(self, task, model, sent, received, seconds, cached=None):
         """Note one model call for the statistics table.
 
         Only counts and timings are kept - never any part of the text.
@@ -2171,6 +2174,7 @@ class JBGtranscriber():
             "task": task,
             "model": model,
             "sent": sent or 0,
+            "cached": cached or 0,
             "received": received or 0,
             "seconds": seconds,
         })
@@ -2180,16 +2184,20 @@ class JBGtranscriber():
         rows = []
         order = []
         totals = {}
+        prices = get_price_table()
         for call in self.model_calls:
             key = (call["task"], call["model"])
             if key not in totals:
-                totals[key] = {"calls": 0, "sent": 0, "received": 0, "seconds": 0.0}
+                totals[key] = {"calls": 0, "sent": 0, "received": 0, "seconds": 0.0, "cost": 0.0}
                 order.append(key)
             t = totals[key]
             t["calls"] += 1
             t["sent"] += call["sent"]
             t["received"] += call["received"]
             t["seconds"] += call["seconds"]
+            cost = call_cost(call["model"], call["sent"], call.get("cached", 0), call["received"], prices)
+            # One unpriced call makes the whole row unknown rather than too low.
+            t["cost"] = None if cost is None or t["cost"] is None else t["cost"] + cost
 
         for key in order:
             task, model = key
@@ -2199,14 +2207,17 @@ class JBGtranscriber():
                 f"{t['sent']:,}".replace(",", " "),
                 f"{t['received']:,}".replace(",", " "),
                 JBGtranscriber._format_duration(t["seconds"]),
+                format_cost(t["cost"]) if t["cost"] is not None else "-",
             ])
 
         if self.transcription_seconds:
+            # Whisper runs locally; there is no charge to show.
             rows.insert(0, [
                 "Transkribering",
                 self.transcriber_model_used or "-",
                 "1", "-", "-",
                 JBGtranscriber._format_duration(self.transcription_seconds),
+                "-",
             ])
 
         if len(rows) > 1:
@@ -2218,8 +2229,48 @@ class JBGtranscriber():
                 JBGtranscriber._format_duration(
                     sum(t["seconds"] for t in totals.values()) + (self.transcription_seconds or 0)
                 ),
+                format_cost(total_cost) if (total_cost := self._openai_cost()[0]) is not None else "-",
             ])
         return rows
+
+    def _openai_cost(self):
+        """Total cost of the OpenAI calls and the models without a price.
+
+        The total is None when there were no calls or any call lacks a price,
+        so that a partial sum is never presented as the cost of the run.
+        """
+        calls = self.__dict__.get("model_calls", [])
+        if not calls:
+            return None, []
+        prices = get_price_table()
+        total, unpriced = 0.0, []
+        for call in calls:
+            cost = call_cost(call["model"], call["sent"], call.get("cached", 0), call["received"], prices)
+            if cost is None:
+                if call["model"] not in unpriced:
+                    unpriced.append(call["model"])
+            else:
+                total += cost
+        return (None if unpriced else total), unpriced
+
+    def _cost_note(self):
+        """One sentence for "Om transkriberingen" on what the OpenAI calls cost."""
+        calls = self.__dict__.get("model_calls", [])
+        if not calls:
+            return ""
+        total, unpriced = self._openai_cost()
+        prices = get_price_table()
+        if unpriced:
+            return (
+                "Kostnaden för OpenAI-anropen kunde inte uppskattas, eftersom prisfilen "
+                f"saknar pris för {', '.join(unpriced)}."
+            )
+        checked = f"kontrollerade {prices['checked']}" if prices["checked"] else "utan angivet kontrolldatum"
+        return (
+            f"Uppskattad kostnad för OpenAI-anropen: {format_cost(total)} {prices['currency']}, "
+            f"beräknad med listpriserna i prisfilen ({checked}). Cachad indata är räknad till "
+            "cachepris. Fakturan från OpenAI kan avvika."
+        )
 
     @staticmethod
     def _format_duration(seconds):
@@ -2274,7 +2325,12 @@ class JBGtranscriber():
             )
         if self.transcription_from_cache:
             line += " Transkriberingen återanvändes från en tidigare körning av samma ljudfil."
-        return line + "\n\n" + f"Programversion: {JBGtranscriber._program_version()}."
+        parts = [line]
+        cost_note = self._cost_note()
+        if cost_note:
+            parts.append(cost_note)
+        parts.append(f"Programversion: {JBGtranscriber._program_version()}.")
+        return "\n\n".join(parts)
 
     @staticmethod
     def _program_version():
@@ -2343,7 +2399,9 @@ class JBGtranscriber():
             # Provenance and statistics belong after the content, not between
             # the transcription and the analyses.
             ("Om transkriberingen", self._transcription_provenance(), "plain"),
-            ("Statistik", [STATISTICS_TABLE_HEADER] + statistics if statistics else "", "table"),
+            ("Statistik",
+             [STATISTICS_TABLE_HEADER + [f"Kostnad ({get_price_table()['currency']})"]] + statistics
+             if statistics else "", "table"),
         ]
 
         temp_path = self.export_path.with_name(self.export_path.name + ".tmp")

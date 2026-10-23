@@ -1,0 +1,142 @@
+{
+  "_kommentar": [
+    "Priser per miljon tokens, standardnivån, hämtade från OpenAI:s prislista.",
+    "",
+    "  in      indata som inte fanns i cachen",
+    "  cachad  indata som lästes ur promptcachen, ofta en tiondel av 'in'",
+    "  ut      modellens svar",
+    "",
+    "Cachade tokens räknas separat eftersom de dominerar: i en verklig körning",
+    "var 88 procent av alla prompt-tokens cachade. Att debitera dem till fullt",
+    "pris överskattade kostnaden flera gånger om.",
+    "",
+    "Nyckeln matchas mot modellnamnet, och ett namn med datumsuffix",
+    "('gpt-5.2-2025-12-11') matchar nyckeln 'gpt-5.2'.",
+    "",
+    "Priserna gäller korta kontext (under 272K tokens) och standardnivån, inte",
+    "batch, flex eller fast mode. Kontrollera mot aktuell prislista.",
+    "OBS: 'cache writes' för gpt-5.6-familjen och gpt-6-astra debiteras separat",
+    "och ingår inte i uppskattningen; API:et rapporterar dem inte per anrop.",
+    "Pro-modellerna har inget publicerat cache-pris. De får cachad = in, så att",
+    "kostnaden aldrig underskattas.",
+    "",
+    "JBG-transkribering läser också tre nycklar till:",
+    "",
+    "  _kontrollerad    datum (ÅÅÅÅ-MM-DD) då priserna senast stämdes av mot",
+    "                   prislistan. Vid varje start varnar loggen om datumet",
+    "                   saknas eller är äldre än 90 dagar.",
+    "  _i_menyn         modellerna som går att välja i appen, i menyns ordning.",
+    "                   Varje modell här måste ha ett pris.",
+    "  _standardmodell  modellen som är förvald i menyn."
+  ],
+  "_valuta": "USD",
+  "_kontrollerad": null,
+  "_i_menyn": [
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.4-mini",
+    "gpt-5.2",
+    "gpt-5.1"
+  ],
+  "_standardmodell": "gpt-5.2",
+  "gpt-5.6-solar": {
+    "in": 4.0,
+    "cachad": 0.4,
+    "ut": 20.0
+  },
+  "gpt-5.6-sol": {
+    "in": 4.0,
+    "cachad": 0.4,
+    "ut": 20.0
+  },
+  "gpt-5.6-terra": {
+    "in": 2.0,
+    "cachad": 0.2,
+    "ut": 12.0
+  },
+  "gpt-5.6-luna": {
+    "in": 0.2,
+    "cachad": 0.02,
+    "ut": 1.2
+  },
+  "gpt-5.5-pro": {
+    "in": 30.0,
+    "cachad": 30.0,
+    "ut": 180.0
+  },
+  "gpt-5.5": {
+    "in": 5.0,
+    "cachad": 0.5,
+    "ut": 30.0
+  },
+  "gpt-5.4-pro": {
+    "in": 30.0,
+    "cachad": 30.0,
+    "ut": 180.0
+  },
+  "gpt-5.4-mini": {
+    "in": 0.75,
+    "cachad": 0.075,
+    "ut": 4.5
+  },
+  "gpt-5.4-nano": {
+    "in": 0.2,
+    "cachad": 0.02,
+    "ut": 1.25
+  },
+  "gpt-5.4": {
+    "in": 2.5,
+    "cachad": 0.25,
+    "ut": 15.0
+  },
+  "gpt-5.2-pro": {
+    "in": 21.0,
+    "cachad": 21.0,
+    "ut": 168.0
+  },
+  "gpt-5.2": {
+    "in": 1.75,
+    "cachad": 0.175,
+    "ut": 14.0
+  },
+  "gpt-5.1": {
+    "in": 1.25,
+    "cachad": 0.125,
+    "ut": 10.0
+  },
+  "gpt-5-pro": {
+    "in": 15.0,
+    "cachad": 15.0,
+    "ut": 120.0
+  },
+  "gpt-5-mini": {
+    "in": 0.25,
+    "cachad": 0.025,
+    "ut": 2.0
+  },
+  "gpt-5-nano": {
+    "in": 0.05,
+    "cachad": 0.005,
+    "ut": 0.4
+  },
+  "gpt-5": {
+    "in": 1.25,
+    "cachad": 0.125,
+    "ut": 10.0
+  },
+  "gpt-6-astra": {
+    "in": 10.0,
+    "cachad": 1.0,
+    "ut": 50.0
+  },
+  "gpt-4o-mini": {
+    "in": 0.15,
+    "cachad": 0.075,
+    "ut": 0.6
+  },
+  "gpt-4o": {
+    "in": 2.5,
+    "cachad": 1.25,
+    "ut": 10.0
+  }
+}

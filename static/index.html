@@ -60,14 +60,9 @@
             <legend><h4>Lägg till mer OpenAI-baserad textanalys</h4></legend>
             <label for="apiKey" title="Ett lösenord du får av lokalsamordnaren, se lathunden">Skriv in din API-nyckel:</label><br>
             <input type="password" id="apiKey" placeholder="sk-..." style="width: 100%; max-width: 400px;">
-            <label for="modelSelect" title="Nyare modeller ger bättre prestanda men kostar mer att använda">Välj språkmodell för analysen:</label><br>
-            <select id="modelSelect" style="width: 100%; max-width: 400px;">
-                <option value="gpt-5.6-terra" >gpt-5.6-terra</option>
-                <option value="gpt-5.6-luna" >gpt-5.6-luna</option>
-                <option value="gpt-5.4-mini" >gpt-5.4-mini</option>
-                <option value="gpt-5.2" selected>gpt-5.2</option>
-                <option value="gpt-5.1">gpt-5.1</option>
-            </select>
+            <label for="modelSelect" title="Nyare modeller ger bättre prestanda men kostar mer att använda">Välj språkmodell för analysen (pris per miljon tokens i <span id="modelPriceCurrency">USD</span>):</label><br>
+            <!-- Fylls i av script.js från /config, som läser policy/model_prices.json -->
+            <select id="modelSelect" style="width: 100%; max-width: 400px;"></select>
             <label>Ange vilken textanalys du vill göra:</label><br>
             <label><input type="checkbox" id="optSummary" title="Skapar en sammanfattning av den transkriberade texten. Du väljer typ nedan och kan ändra instruktionen"> Generera sammanfattning</label>
             <div id="summaryOptions" class="summary-options" hidden>
