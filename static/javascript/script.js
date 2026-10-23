@@ -6,13 +6,21 @@ let globalEncryptionKeyBase64 = "";
 let supportedAudioExtensions = [".mp3", ".m4a", ".wav", ".aac", ".flac", ".ogg"];
 let maxUploadMb = 1024;
 
-// --- Editable summary instruction -------------------------------------------
-// The two default texts ("Enkel" and "Utförlig") are fetched from the backend so
-// that policy/prompt_policy.json stays the single source of truth. The user may
-// edit the text freely; an edited text is remembered between visits.
+// --- Editable instructions ---------------------------------------------------
+// The standard texts are fetched from the backend so that
+// policy/prompt_policy.json stays the single source of truth. An edited text
+// is remembered between visits, in this browser only.
 
 const SUMMARY_PROMPT_STORAGE_KEY = "jbg_summary_prompt";
 const SUMMARY_STYLE_STORAGE_KEY = "jbg_summary_style";
+const QUESTIONS_PROMPT_STORAGE_KEY = "jbg_questions_prompt";
+const SPEAKERS_PROMPT_STORAGE_KEY = "jbg_speakers_prompt";
+const CUSTOM_PROMPT_STORAGE_KEY = "jbg_custom_prompt";
+
+// Used only if /analysis_prompts cannot be reached; the server always puts its
+// own copy of the opening first.
+const FALLBACK_CUSTOM_PREAMBLE =
+    "Du analyserar och sammanställer transkriberad text från en ljudinspelning. Gör följande analys:";
 
 // Option ids retired in an earlier version. Browsers still hold these, so a
 // stored value is mapped rather than silently falling back to the default.
@@ -21,6 +29,36 @@ const LEGACY_SUMMARY_STYLE_IDS = { short: "enkel", extensive: "utforlig" };
 let summaryOptions = [];              // [{id, label, description, default, prompt}]
 let summaryPromptMaxLength = 20000;
 let summaryOptionsLoaded = false;
+let summaryPromptText = "";           // the summary instruction in use
+
+// Standard texts for follow-up questions and speakers, and the fixed opening
+// of the custom analysis. Null until /analysis_prompts has answered.
+let analysisDefaults = null;
+// What the user has written. Empty means the standard text; for the custom
+// analysis it means that nothing has been written.
+let questionsPromptText = "";
+let speakersPromptText = "";
+let customPromptText = "";
+
+function readStored(key) {
+    try {
+        return localStorage.getItem(key) || "";
+    } catch (err) {
+        return "";
+    }
+}
+
+function writeStored(key, value) {
+    try {
+        if (value) {
+            localStorage.setItem(key, value);
+        } else {
+            localStorage.removeItem(key);
+        }
+    } catch (err) {
+        console.warn("Kunde inte spara instruktionen lokalt:", err);
+    }
+}
 
 function currentSummaryStyle() {
     return document.getElementById("summaryStyle").value || "";
@@ -41,8 +79,7 @@ function summaryStyleLabel(id) {
 }
 
 function isSummaryPromptEdited() {
-    const textarea = document.getElementById("summaryPrompt");
-    return textarea.value.trim() !== defaultSummaryPromptFor(currentSummaryStyle()).trim();
+    return summaryPromptText.trim() !== defaultSummaryPromptFor(currentSummaryStyle()).trim();
 }
 
 function matchesAnySummaryDefault(text) {
@@ -63,37 +100,33 @@ function refreshSummaryStyleDescription() {
     }
 }
 
-function refreshSummaryPromptState() {
-    const state = document.getElementById("summaryPromptState");
-    const resetButton = document.getElementById("resetSummaryPrompt");
+function showPromptState(id, edited) {
+    // Nothing is shown while the standard text is in place - that is the
+    // normal case. An edited instruction is called out, since it is the
+    // state the user could otherwise forget they are in.
+    const state = document.getElementById(id);
+    if (!state) return;
+    state.textContent = edited ? "Egen text används." : "";
+    state.hidden = !edited;
+}
 
+function refreshSummaryPromptState() {
     if (!summaryOptionsLoaded) {
+        const state = document.getElementById("summaryPromptState");
         state.textContent = "Standardtexterna kunde inte hämtas. Skriv en egen instruktion, annars används serverns standardtext.";
         state.hidden = false;
-        resetButton.hidden = true;
         return;
     }
+    showPromptState("summaryPromptState", isSummaryPromptEdited());
+}
 
-    // Nothing is shown while a default text is in place - that is the normal
-    // case and needs no label. An edited instruction is still called out,
-    // since it is the state the user could otherwise forget they are in.
-    if (isSummaryPromptEdited()) {
-        state.textContent = "Egen text används.";
-        state.hidden = false;
-        resetButton.hidden = false;
-    } else {
-        state.textContent = "";
-        state.hidden = true;
-        resetButton.hidden = true;
-    }
-    const subtitle = document.getElementById("summaryEditorSubtitle");
-    if (subtitle) {
-        subtitle.textContent = `Utgår från: ${summaryStyleLabel(currentSummaryStyle())}`;
-    }
+function refreshAnalysisPromptStates() {
+    showPromptState("questionsPromptState", questionsPromptText !== "");
+    showPromptState("speakersPromptState", speakersPromptText !== "");
 }
 
 function applySummaryDefault(id) {
-    document.getElementById("summaryPrompt").value = defaultSummaryPromptFor(id);
+    summaryPromptText = defaultSummaryPromptFor(id);
     storeSummaryPrompt();
     refreshSummaryStyleDescription();
     refreshSummaryPromptState();
@@ -101,7 +134,7 @@ function applySummaryDefault(id) {
 
 function storeSummaryPrompt() {
     try {
-        localStorage.setItem(SUMMARY_PROMPT_STORAGE_KEY, document.getElementById("summaryPrompt").value);
+        localStorage.setItem(SUMMARY_PROMPT_STORAGE_KEY, summaryPromptText);
         localStorage.setItem(SUMMARY_STYLE_STORAGE_KEY, currentSummaryStyle());
     } catch (err) {
         console.warn("Kunde inte spara sammanfattningsinstruktionen lokalt:", err);
@@ -121,13 +154,86 @@ function populateSummaryStyleSelect() {
     });
 }
 
+// An edited text equal to the standard text is no edit at all.
+function editedOrEmpty(text, standard) {
+    const trimmed = (text || "").trim();
+    return trimmed === (standard || "").trim() ? "" : trimmed;
+}
+
+// --- What the editor can edit -------------------------------------------------
+// One dialog serves every instruction. Each target says what to show, what
+// its standard text is, and what to do on Klar and on Avbryt.
+
+const editorTargets = {
+    summary: {
+        title: "Redigera promptinstruktioner",
+        subtitle: () => `Utgår från: ${summaryStyleLabel(currentSummaryStyle())}`,
+        prefix: () => "",
+        text: () => summaryPromptText,
+        standard: () => defaultSummaryPromptFor(currentSummaryStyle()),
+        resetLabel: "Återgå till standardtexten",
+        trigger: () => document.getElementById("openSummaryEditor"),
+        apply: text => {
+            summaryPromptText = text;
+            storeSummaryPrompt();
+            refreshSummaryPromptState();
+        },
+    },
+    questions: {
+        title: "Redigera instruktionen för följdfrågor",
+        subtitle: () => "",
+        prefix: () => "",
+        text: () => questionsPromptText || (analysisDefaults ? analysisDefaults.follow_up_questions : ""),
+        standard: () => (analysisDefaults ? analysisDefaults.follow_up_questions : ""),
+        resetLabel: "Återgå till standardtexten",
+        trigger: () => document.getElementById("openQuestionsEditor"),
+        apply: text => {
+            questionsPromptText = editedOrEmpty(text, editorTargets.questions.standard());
+            writeStored(QUESTIONS_PROMPT_STORAGE_KEY, questionsPromptText);
+            refreshAnalysisPromptStates();
+        },
+    },
+    speakers: {
+        title: "Redigera instruktionen för talaridentifiering",
+        subtitle: () => "Beskriv inspelningen och vilka beteckningar talarna ska få. Formen på svaret, en replik per rad med talarens beteckning, läggs till automatiskt.",
+        prefix: () => "",
+        text: () => speakersPromptText || (analysisDefaults ? analysisDefaults.speaker_diarization : ""),
+        standard: () => (analysisDefaults ? analysisDefaults.speaker_diarization : ""),
+        resetLabel: "Återgå till standardtexten",
+        trigger: () => document.getElementById("openSpeakersEditor"),
+        apply: text => {
+            speakersPromptText = editedOrEmpty(text, editorTargets.speakers.standard());
+            writeStored(SPEAKERS_PROMPT_STORAGE_KEY, speakersPromptText);
+            refreshAnalysisPromptStates();
+        },
+    },
+    custom: {
+        title: "Anpassad analys",
+        subtitle: () => "Skriv vilken analys som ska göras. Den inledande meningen är fast och skickas alltid först.",
+        prefix: () => (analysisDefaults && analysisDefaults.custom_analysis_preamble) || FALLBACK_CUSTOM_PREAMBLE,
+        text: () => customPromptText,
+        standard: () => "",
+        resetLabel: "Rensa texten",
+        trigger: () => document.getElementById("optCustom"),
+        // Checked only if something has been written after the fixed opening.
+        apply: text => {
+            customPromptText = (text || "").trim();
+            writeStored(CUSTOM_PROMPT_STORAGE_KEY, customPromptText);
+            document.getElementById("optCustom").checked = customPromptText !== "";
+        },
+        cancel: () => {
+            document.getElementById("optCustom").checked = false;
+        },
+    },
+};
+
 // --- Floating editor ---------------------------------------------------------
 // The instruction is edited in a <dialog> so that showing it never changes the
 // height of the page. Native showModal() is used for the focus trap, the
 // backdrop and Esc; only its default centring is overridden, because that
 // centres on the iframe's own viewport rather than what the user can see.
 
-let summaryPromptSnapshot = null;   // text as it was when the editor opened
+let activeEditorTarget = null;      // the entry of editorTargets being edited
 let latestParentPageInfo = null;    // from iframe-resizer, when embedded
 
 function trackParentPageInfo() {
@@ -143,14 +249,14 @@ function trackParentPageInfo() {
     }
 }
 
-function positionSummaryEditor(trigger) {
+function positionPromptEditor(trigger) {
     // Called after the dialog is shown, so its real height can be measured.
-    const dialog = document.getElementById("summaryEditor");
+    const dialog = document.getElementById("promptEditor");
     const dialogHeight = dialog.offsetHeight || 460;
     const info = latestParentPageInfo;
 
-    // Fallback: anchor above the link the user just clicked. It is on screen by
-    // definition, so this is safe when nothing else is known.
+    // Fallback: anchor above the control the user just clicked. It is on
+    // screen by definition, so this is safe when nothing else is known.
     let top = trigger.getBoundingClientRect().top + window.scrollY - 120;
 
     if (info && typeof info.scrollTop === "number" && typeof info.offsetTop === "number") {
@@ -169,35 +275,59 @@ function positionSummaryEditor(trigger) {
     dialog.style.top = `${Math.round(Math.max(8, top))}px`;
 }
 
-function openSummaryEditor() {
-    const dialog = document.getElementById("summaryEditor");
-    const textarea = document.getElementById("summaryPrompt");
-    const trigger = document.getElementById("openSummaryEditor");
+function refreshEditorReset() {
+    const target = activeEditorTarget;
+    const reset = document.getElementById("resetPromptEditor");
+    if (!target) return;
+    const textarea = document.getElementById("promptEditorText");
+    reset.textContent = target.resetLabel;
+    reset.hidden = textarea.value.trim() === target.standard().trim();
+}
 
-    summaryPromptSnapshot = textarea.value;
+function openPromptEditor(key) {
+    const target = editorTargets[key];
+    const dialog = document.getElementById("promptEditor");
+    const textarea = document.getElementById("promptEditorText");
+
+    activeEditorTarget = target;
+    document.getElementById("promptEditorTitle").textContent = target.title;
+
+    const subtitle = document.getElementById("promptEditorSubtitle");
+    subtitle.textContent = target.subtitle();
+    subtitle.hidden = subtitle.textContent === "";
+
+    const prefix = document.getElementById("promptEditorPrefix");
+    prefix.textContent = target.prefix();
+    prefix.hidden = prefix.textContent === "";
+
+    textarea.maxLength = summaryPromptMaxLength;
+    textarea.value = target.text();
+    refreshEditorReset();
 
     if (typeof dialog.showModal === "function") {
         dialog.showModal();
     } else {
         dialog.setAttribute("open", "");   // very old browsers: no modality
     }
-    positionSummaryEditor(trigger);
+    positionPromptEditor(target.trigger());
     textarea.focus();
     textarea.setSelectionRange(0, 0);
     textarea.scrollTop = 0;
 }
 
-function closeSummaryEditor(apply) {
-    const dialog = document.getElementById("summaryEditor");
-    const textarea = document.getElementById("summaryPrompt");
+function closePromptEditor(apply) {
+    const dialog = document.getElementById("promptEditor");
+    const textarea = document.getElementById("promptEditorText");
+    const target = activeEditorTarget;
+    activeEditorTarget = null;
 
-    if (!apply && summaryPromptSnapshot !== null) {
-        textarea.value = summaryPromptSnapshot;   // Avbryt and Esc revert
+    if (target) {
+        if (apply) {
+            target.apply(textarea.value);
+        } else if (target.cancel) {
+            target.cancel();             // Avbryt, Esc and the backdrop
+        }
     }
-    summaryPromptSnapshot = null;
-
-    storeSummaryPrompt();
-    refreshSummaryPromptState();
 
     if (dialog.open && typeof dialog.close === "function") {
         dialog.close();
@@ -206,49 +336,88 @@ function closeSummaryEditor(apply) {
     }
 }
 
-function setUpSummaryEditorDialog() {
-    const dialog = document.getElementById("summaryEditor");
+function setUpPromptEditorDialog() {
+    const dialog = document.getElementById("promptEditor");
+    const textarea = document.getElementById("promptEditorText");
 
     document.getElementById("openSummaryEditor")
-        .addEventListener("click", openSummaryEditor);
-    document.getElementById("applySummaryEditor")
-        .addEventListener("click", () => closeSummaryEditor(true));
-    document.getElementById("cancelSummaryEditor")
-        .addEventListener("click", () => closeSummaryEditor(false));
+        .addEventListener("click", () => openPromptEditor("summary"));
+    document.getElementById("openQuestionsEditor")
+        .addEventListener("click", () => openPromptEditor("questions"));
+    document.getElementById("openSpeakersEditor")
+        .addEventListener("click", () => openPromptEditor("speakers"));
+    document.getElementById("applyPromptEditor")
+        .addEventListener("click", () => closePromptEditor(true));
+    document.getElementById("cancelPromptEditor")
+        .addEventListener("click", () => closePromptEditor(false));
 
-    // Esc means the same here as everywhere else: discard and close.
-    dialog.addEventListener("cancel", event => {
-        event.preventDefault();
-        closeSummaryEditor(false);
+    document.getElementById("resetPromptEditor").addEventListener("click", () => {
+        if (!activeEditorTarget) return;
+        textarea.value = activeEditorTarget.standard();
+        refreshEditorReset();
+        textarea.focus();
     });
-
-    // Clicking the backdrop is treated as Avbryt.
-    dialog.addEventListener("click", event => {
-        if (event.target === dialog) closeSummaryEditor(false);
-    });
-
-    trackParentPageInfo();
-}
-
-function setUpSummaryPromptEditor() {
-    const textarea = document.getElementById("summaryPrompt");
-    const resetButton = document.getElementById("resetSummaryPrompt");
-    const select = document.getElementById("summaryStyle");
 
     textarea.addEventListener("input", () => {
         if (textarea.value.length > summaryPromptMaxLength) {
             textarea.value = textarea.value.slice(0, summaryPromptMaxLength);
         }
-        storeSummaryPrompt();
-        refreshSummaryPromptState();
+        refreshEditorReset();
     });
 
-    resetButton.addEventListener("click", () => {
-        applySummaryDefault(currentSummaryStyle());
-        textarea.focus();
+    // Esc means the same here as everywhere else: discard and close.
+    dialog.addEventListener("cancel", event => {
+        event.preventDefault();
+        closePromptEditor(false);
     });
 
-    setUpSummaryEditorDialog();
+    // Clicking the backdrop is treated as Avbryt.
+    dialog.addEventListener("click", event => {
+        if (event.target === dialog) closePromptEditor(false);
+    });
+
+    trackParentPageInfo();
+}
+
+// The custom analysis has no Redigera link: checking the box always opens the
+// editor, and unchecking it keeps the text for next time.
+function setUpCustomAnalysis() {
+    const checkbox = document.getElementById("optCustom");
+    checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+            checkbox.checked = false;      // until Klar decides
+            openPromptEditor("custom");
+        }
+    });
+}
+
+function setUpAnalysisPrompts() {
+    customPromptText = readStored(CUSTOM_PROMPT_STORAGE_KEY).trim();
+
+    fetch("/analysis_prompts")
+        .then(res => res.json())
+        .then(data => {
+            analysisDefaults = data;
+            if (data.max_length) summaryPromptMaxLength = data.max_length;
+            // A stored text equal to the standard text is not an edit.
+            questionsPromptText = editedOrEmpty(readStored(QUESTIONS_PROMPT_STORAGE_KEY), data.follow_up_questions);
+            speakersPromptText = editedOrEmpty(readStored(SPEAKERS_PROMPT_STORAGE_KEY), data.speaker_diarization);
+            refreshAnalysisPromptStates();
+        })
+        .catch(err => {
+            console.warn("Kunde inte hämta standardtexter för analyserna:", err);
+            questionsPromptText = readStored(QUESTIONS_PROMPT_STORAGE_KEY).trim();
+            speakersPromptText = readStored(SPEAKERS_PROMPT_STORAGE_KEY).trim();
+            refreshAnalysisPromptStates();
+        });
+}
+
+function setUpSummaryPromptEditor() {
+    const select = document.getElementById("summaryStyle");
+
+    setUpPromptEditorDialog();
+    setUpCustomAnalysis();
+    setUpAnalysisPrompts();
 
     // Remembered so the selection can be restored if the user cancels.
     let previousStyle = null;
@@ -257,7 +426,7 @@ function setUpSummaryPromptEditor() {
 
     select.addEventListener("change", () => {
         const newStyle = select.value;
-        const edited = !matchesAnySummaryDefault(textarea.value) && textarea.value.trim() !== "";
+        const edited = !matchesAnySummaryDefault(summaryPromptText) && summaryPromptText.trim() !== "";
 
         if (edited) {
             const proceed = confirm(
@@ -306,7 +475,7 @@ function setUpSummaryPromptEditor() {
                 savedPrompt.trim() !== "" &&
                 !matchesAnySummaryDefault(savedPrompt);
 
-            textarea.value = hasCustomText ? savedPrompt : defaultSummaryPromptFor(select.value);
+            summaryPromptText = hasCustomText ? savedPrompt : defaultSummaryPromptFor(select.value);
 
             refreshSummaryStyleDescription();
             refreshSummaryPromptState();
@@ -417,6 +586,7 @@ document.addEventListener("DOMContentLoaded", () => {
         document.getElementById("optSummary"),
         document.getElementById("optQuestions"),
         document.getElementById("optSpeakers"),
+        document.getElementById("optCustom"),
     ];
 
     // Marking suspected errors is done by the language model, so that
@@ -443,6 +613,16 @@ document.addEventListener("DOMContentLoaded", () => {
         summaryOptions.hidden = !show;
         document.getElementById("summaryStyle").disabled = !show;
         document.getElementById("openSummaryEditor").disabled = !show;
+    });
+
+    // Follow-up questions and speakers: reveal their Redigera link when checked.
+    [["optQuestions", "questionsOptions", "openQuestionsEditor"],
+     ["optSpeakers", "speakersOptions", "openSpeakersEditor"]].forEach(([boxId, blockId, linkId]) => {
+        const box = document.getElementById(boxId);
+        box.addEventListener("change", () => {
+            document.getElementById(blockId).hidden = !box.checked;
+            document.getElementById(linkId).disabled = !box.checked;
+        });
     });
 
     setUpSummaryPromptEditor();
@@ -501,7 +681,10 @@ async function uploadFile() {
     document.getElementById("accuracySelect").disabled = true;
     document.getElementById("fastEngine").disabled = true;
     document.getElementById("optQuestions").disabled = true;
+    document.getElementById("openQuestionsEditor").disabled = true;
     document.getElementById("optSpeakers").disabled = true;
+    document.getElementById("openSpeakersEditor").disabled = true;
+    document.getElementById("optCustom").disabled = true;
     document.getElementById("button").disabled = true;
 
     // Prepare data to send for backend
@@ -551,7 +734,7 @@ async function uploadFile() {
     // Empty means "use the server-side default for the chosen style".
     formData.append(
         "summary_prompt",
-        summarizeChecked ? document.getElementById("summaryPrompt").value.trim() : ""
+        summarizeChecked ? summaryPromptText.trim() : ""
     );
     formData.append("transcription_accuracy", document.getElementById("accuracySelect").value);
     formData.append("fast_engine", document.getElementById("fastEngine").checked);
@@ -559,8 +742,17 @@ async function uploadFile() {
         "transcription_format",
         document.querySelector('input[name="transcriptionFormat"]:checked')?.value || "raw"
     );
-    formData.append("questions", document.getElementById("optQuestions").checked);
-    formData.append("speakers", document.getElementById("optSpeakers").checked);
+    const questionsChecked = document.getElementById("optQuestions").checked;
+    const speakersChecked = document.getElementById("optSpeakers").checked;
+    const customChecked = document.getElementById("optCustom").checked;
+    formData.append("questions", questionsChecked);
+    formData.append("speakers", speakersChecked);
+    // Empty means the standard text; only an edited text is sent.
+    formData.append("questions_prompt", questionsChecked ? questionsPromptText : "");
+    formData.append("speakers_prompt", speakersChecked ? speakersPromptText : "");
+    // Only what follows the fixed opening; the server adds the opening.
+    formData.append("custom_analysis", customChecked);
+    formData.append("custom_prompt", customChecked ? customPromptText : "");
 
     fileInput.disabled = true;
 

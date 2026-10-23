@@ -220,6 +220,26 @@ SPEAKER_REGISTER_SUFFIX = (
     "beteckning. Allt som beskriver talarna hör hemma i registret."
 )
 
+# The format of the dialogue is fixed by the code, not by the editable
+# instruction: the document is laid out by reading "Beteckning: replik" line by
+# line, and a user who edits the instruction must not be able to break that.
+# The editable text only describes the recording and which labels to use.
+SPEAKER_FORMAT_SUFFIX = (
+    "SVARETS FORM:\n"
+    "Återge hela texten som en dialog. Varje replik står på en egen rad och börjar "
+    "med talarens beteckning följd av kolon och mellanslag, till exempel:\n"
+    "Talare 1: Kan du beskriva hur det går till?\n"
+    "Talare 2: Ja, först får vi ett meddelande...\n"
+    "Använd de beteckningar som instruktionen ovan anger. Gör en radbrytning mellan "
+    "varje replik. Hitta inte på namn. Skriv inget utanför själva dialogen."
+)
+
+# The fixed opening of the custom analysis, used if the policy file lacks it.
+DEFAULT_CUSTOM_ANALYSIS_PREAMBLE = (
+    "Du analyserar och sammanställer transkriberad text från en ljudinspelning. "
+    "Gör följande analys:"
+)
+
 SPEAKER_REGISTER_PREAMBLE = (
     "TALARE SOM REDAN IDENTIFIERATS TIDIGARE I SAMTALET:\n"
     "{register}\n\n"
@@ -455,6 +475,7 @@ class JBGtranscriber():
         self.summary = ""
         self.marked_text = ""
         self.follow_up_questions = ""
+        self.custom_analysis = ""
         self.analyze_speakers = ""
 
     # Resolved from the package location rather than the current working
@@ -470,6 +491,23 @@ class JBGtranscriber():
         except Exception as e:
             logger.error(f" Could not load prompt policy: {e}")
             return {}
+
+    @staticmethod
+    def analysis_prompt_defaults(policy=None):
+        """Standard texts for the editable analyses, for the GUI."""
+        policy = policy if policy is not None else JBGtranscriber.load_policy_file()
+        return {
+            "follow_up_questions": JBGtranscriber.policy_text(
+                policy, "follow_up_questions", "Generera uppföljningsfrågor."
+            ),
+            "speaker_diarization": JBGtranscriber.policy_text(
+                policy, "speaker_diarization",
+                "Försök att identifiera olika röster i följande transkribering:",
+            ),
+            "custom_analysis_preamble": JBGtranscriber.policy_text(
+                policy, "custom_analysis_preamble", DEFAULT_CUSTOM_ANALYSIS_PREAMBLE
+            ),
+        }
 
     @staticmethod
     def policy_text(policy, key, default=""):
@@ -568,6 +606,8 @@ class JBGtranscriber():
     transcription_engine = DEFAULT_TRANSCRIPTION_ENGINE
     transcription_device = ""
     speaker_register = {}
+    custom_analysis = ""
+    transcription_from_cache = False
 
     def load_prompt_policy(self):
         return JBGtranscriber.load_policy_file()
@@ -1370,19 +1410,40 @@ class JBGtranscriber():
             # message where the whole transcription should be.
             self.marked_text = ""
 
-    def suggest_follow_up_questions(self):
-        """Föreslår fem relevanta uppföljningsfrågor baserat på transkriberingen."""
+    @staticmethod
+    def _user_instruction(text, what):
+        """A user-edited instruction, trimmed and capped; empty means none.
+
+        Only its length is logged, never its content, since it may hold
+        case-specific context.
+        """
+        candidate = (text or "").strip()
+        if not candidate:
+            return ""
+        if len(candidate) > MAX_SUMMARY_PROMPT_CHARS:
+            logger.warning(
+                f"{what}: instruktionen kortades från {len(candidate)} till "
+                f"{MAX_SUMMARY_PROMPT_CHARS} tecken."
+            )
+            candidate = candidate[:MAX_SUMMARY_PROMPT_CHARS]
+        logger.info(f"{what}: egen instruktion används ({len(candidate)} tecken).")
+        return candidate
+
+    def suggest_follow_up_questions(self, custom_prompt=None):
+        """Föreslår uppföljningsfrågor baserat på transkriberingen."""
         try:
             self.current_task = "Uppföljningsfrågor"
-            instructions = JBGtranscriber.policy_text(
-                self.prompt_policy, "follow_up_questions", "Generera uppföljningsfrågor:"
+            instructions = JBGtranscriber._user_instruction(
+                custom_prompt, "Uppföljningsfrågor"
+            ) or JBGtranscriber.policy_text(
+                self.prompt_policy, "follow_up_questions", "Generera uppföljningsfrågor."
             )
             self.follow_up_questions = self._condense_whole_text(
                 instructions,
                 self.transcription,
                 "Förslag på uppföljningsfrågor",
                 reduce_suffix=(
-                    "Nedan följer frågeförslag från flera delar av samma intervju. "
+                    "Nedan följer frågeförslag från flera delar av samma inspelning. "
                     "Välj ut och formulera den slutliga uppsättningen frågor enligt "
                     "instruktionerna ovan. Slå ihop frågor som överlappar och "
                     "numrera dem. Nämn inte att materialet varit uppdelat."
@@ -1391,6 +1452,30 @@ class JBGtranscriber():
         except Exception as e:
             logger.error(f"An error occurred while generating follow-up questions: {e}")
             self.follow_up_questions = "Förslag till uppföljande frågor misslyckades"
+
+    def run_custom_analysis(self, custom_prompt):
+        """The user's own analysis, after a fixed opening from the policy.
+
+        The opening cannot be edited, so the instruction always starts the same
+        way and the user only writes what is to be done. Long recordings are
+        split and merged like a summary.
+        """
+        self.current_task = "Anpassad analys"
+        addition = JBGtranscriber._user_instruction(custom_prompt, "Anpassad analys")
+        if not addition:
+            return
+        preamble = JBGtranscriber.policy_text(
+            self.prompt_policy, "custom_analysis_preamble", DEFAULT_CUSTOM_ANALYSIS_PREAMBLE
+        )
+        try:
+            self.custom_analysis = self._condense_whole_text(
+                preamble + "\n" + addition,
+                self.transcription,
+                "Anpassad analys",
+            )
+        except Exception as e:
+            logger.error(f"Den anpassade analysen misslyckades: {e}")
+            self.custom_analysis = "Den anpassade analysen misslyckades"
             
     @staticmethod
     def _split_speaker_register(answer):
@@ -1524,11 +1609,11 @@ class JBGtranscriber():
             )
         return JBGtranscriber._split_speaker_register(answer)
 
-    def do_analyze_speakers(self):
+    def do_analyze_speakers(self, custom_prompt=None):
         """Analysera transkriberingen med avseende på vilka talare som säger vad."""
-        self.do_analyze_speakers_splitted()
+        self.do_analyze_speakers_splitted(custom_prompt=custom_prompt)
 
-    def do_analyze_speakers_splitted(self):
+    def do_analyze_speakers_splitted(self, custom_prompt=None):
         """Label the transcription with who is speaking.
 
         The work rewrites the text rather than condensing it, so the segment
@@ -1540,11 +1625,14 @@ class JBGtranscriber():
         self.current_task = "Talaranalys"
         enc = self._get_encoder_for_segmentation()
 
-        instructions = JBGtranscriber.policy_text(
+        instructions = JBGtranscriber._user_instruction(
+            custom_prompt, "Talaranalys"
+        ) or JBGtranscriber.policy_text(
             self.prompt_policy,
             "speaker_diarization",
             "Försök att identifiera olika röster i följande transkribering:",
         )
+        instructions += "\n\n" + SPEAKER_FORMAT_SUFFIX
         # Capped the same way as other rewriting work, and more tightly: the
         # register is only useful if the text is actually split, and a whole
         # interview in one call gave an unstable speaker count.
@@ -2396,6 +2484,7 @@ class JBGtranscriber():
             ("Sammanfattning", self.summary, "structured"),
             ("Uppföljningsfrågor", self.follow_up_questions, "structured"),
             ("Försök till identifiering av olika talare", self.analyze_speakers, "speakers"),
+            ("Anpassad analys", self.custom_analysis, "structured"),
             # Provenance and statistics belong after the content, not between
             # the transcription and the analyses.
             ("Om transkriberingen", self._transcription_provenance(), "plain"),
@@ -2461,7 +2550,10 @@ class JBGtranscriber():
         find_suspicious_phrases=None,
         suggest_follow_up_questions=False,
         analyze_speakers=False,
-        progress_callback=None
+        progress_callback=None,
+        follow_up_prompt=None,
+        speaker_prompt=None,
+        custom_analysis_prompt=None,
     ):
         """Perform all transcription steps.
 
@@ -2515,13 +2607,17 @@ class JBGtranscriber():
         # Suggest follow-up questions if requested
         if suggest_follow_up_questions:
             report(f"Föreslår uppföljningsfrågor...")
-            self.suggest_follow_up_questions()
+            self.suggest_follow_up_questions(custom_prompt=follow_up_prompt)
             
         # Analyze speakers if requested
         if analyze_speakers:
             report(f"Försöker identifiera olika talare...")
-            #self.do_analyze_speakers()
-            self.do_analyze_speakers_splitted()
+            self.do_analyze_speakers_splitted(custom_prompt=speaker_prompt)
+
+        # The user's own analysis, last as in the GUI
+        if (custom_analysis_prompt or "").strip():
+            report("Gör den anpassade analysen...")
+            self.run_custom_analysis(custom_analysis_prompt)
         
         # Print a message confirming successful completion
         report(f"Alla steg i analysen genomfördes.")

@@ -332,7 +332,7 @@ form button:disabled:hover {
     color: #666;
 }
 
-#summaryPrompt {
+#promptEditorText {
     display: block;
     flex: 1 1 auto;
     width: 100%;
@@ -348,9 +348,24 @@ form button:disabled:hover {
     resize: none;
 }
 
-#summaryPrompt:focus {
+#promptEditorText:focus {
     outline: 2px solid #005293;
     outline-offset: -2px;
+}
+
+/* The fixed opening of the custom analysis: visibly part of the instruction,
+   visibly not editable. */
+.prompt-editor-prefix {
+    margin: 0;
+    padding: 0.75rem 1rem 0.5rem 1rem;
+    line-height: 1.5;
+    color: #555;
+    background-color: #f3f6f9;
+    border-bottom: 1px dashed #d0dae4;
+}
+
+.prompt-editor-prefix[hidden] {
+    display: none;
 }
 
 .summary-editor-actions {

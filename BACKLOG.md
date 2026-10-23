@@ -38,9 +38,6 @@ The version number is kept only in `VERSION`, and each release is tagged
   "Intervjuperson 1 verkar orolig för att rutinerna inte fungerar". The
   transcript does not support inferences about a person's state of mind,
   and the subjects are identifiable staff in a supervisory file.
-- [ ] Let the user edit the instructions for the other analyses too
-  (suspected errors, follow-up questions, speaker identification), reusing
-  the summary prompt editor.
 - [ ] Let the user save their own edited instruction as a named option,
   alongside the ones defined in the policy file.
 - [ ] Show an estimated segment count, and from it a cost, before upload. The
@@ -53,6 +50,17 @@ The version number is kept only in `VERSION`, and each release is tagged
 
 ## Solved
 
+- [X] Let the user edit the instructions for follow-up questions and speaker
+  identification, and add a custom analysis ("Anpassad") for recordings that
+  are not interviews, such as meetings. One editor dialog now serves the
+  summary, both analyses and the custom analysis. The custom analysis starts
+  with a fixed opening from `custom_analysis_preamble` that cannot be edited;
+  checking the box opens the editor, Klar leaves it checked only if something
+  was written, and the text is kept in the browser between visits. The speaker
+  answer format moved from the editable instruction into the code, so an
+  edited instruction cannot break the layout. Suspected errors stay
+  non-editable: their instruction defines the marker format the document
+  depends on
 - [X] Show the cost of the OpenAI calls in the result document. Prices per
   model are kept in `policy/model_prices.json`, with input, cached input and
   output priced separately, since most input in a long run is cached. The

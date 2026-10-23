@@ -75,8 +75,21 @@
                     <span id="summaryPromptState" class="summary-prompt-state" hidden></span>
                 </div>
             </div>
-            <label><input type="checkbox" id="optQuestions" title="Genererar förslag på uppföljningsfrågor baserat på den transkriberade texten"> Föreslå följdfrågor baserat på innehållet</label><br>
-            <label><input type="checkbox" id="optSpeakers" title="Återger hela texten med talarbeteckningar och listar de identifierade talarna sist. Beteckningarna bygger på ordval och sammanhang och kan bli fel"> Identifiera olika talare baserat på innehåll (beta)</label>
+            <label><input type="checkbox" id="optQuestions" title="Genererar förslag på uppföljningsfrågor baserat på den transkriberade texten. Du kan ändra instruktionen"> Föreslå följdfrågor baserat på innehållet</label><br>
+            <div id="questionsOptions" class="summary-options" hidden>
+                <div class="summary-prompt-footer">
+                    <button type="button" id="openQuestionsEditor" class="link-button">Redigera promptinstruktioner</button>
+                    <span id="questionsPromptState" class="summary-prompt-state" hidden></span>
+                </div>
+            </div>
+            <label><input type="checkbox" id="optSpeakers" title="Återger hela texten med talarbeteckningar och listar de identifierade talarna sist. Beteckningarna bygger på ordval och sammanhang och kan bli fel. Du kan ändra instruktionen, till exempel för en mötesinspelning"> Identifiera olika talare baserat på innehåll (beta)</label><br>
+            <div id="speakersOptions" class="summary-options" hidden>
+                <div class="summary-prompt-footer">
+                    <button type="button" id="openSpeakersEditor" class="link-button">Redigera promptinstruktioner</button>
+                    <span id="speakersPromptState" class="summary-prompt-state" hidden></span>
+                </div>
+            </div>
+            <label><input type="checkbox" id="optCustom" title="En egen analys, till exempel av en mötesinspelning. Klicka för att skriva vad som ska göras; rutan förblir ikryssad bara om du har skrivit något"> Anpassad</label>
         </fieldset>
         
         <!-- Display button for uploading file -->
@@ -95,20 +108,24 @@
 
     </div> <!-- Wrapper -->
 
-    <!-- Floating editor for the summary instruction. Kept out of normal flow so
-         that opening it does not change the height of the page. -->
-    <dialog id="summaryEditor" class="summary-editor" aria-labelledby="summaryEditorTitle">
+    <!-- Floating editor shared by the summary, follow-up questions, speakers
+         and the custom analysis. Kept out of normal flow so that opening it
+         does not change the height of the page. script.js fills in the title,
+         the subtitle and, for the custom analysis, the fixed opening. -->
+    <dialog id="promptEditor" class="summary-editor" aria-labelledby="promptEditorTitle">
         <div class="summary-editor-head">
-            <h2 id="summaryEditorTitle">Redigera promptinstruktioner</h2>
-            <p id="summaryEditorSubtitle" class="summary-editor-subtitle"></p>
+            <h2 id="promptEditorTitle">Redigera promptinstruktioner</h2>
+            <p id="promptEditorSubtitle" class="summary-editor-subtitle"></p>
         </div>
-        <textarea id="summaryPrompt" spellcheck="true"
-                  title="Den instruktion som styr sammanfattningen. Ändra texten om du vill ha något annat än standardtexten"></textarea>
+        <!-- Fixed opening that cannot be edited; shown above the text field -->
+        <p id="promptEditorPrefix" class="prompt-editor-prefix" hidden></p>
+        <textarea id="promptEditorText" spellcheck="true"
+                  title="Instruktionen till språkmodellen. Ändra texten om du vill ha något annat än standardtexten"></textarea>
         <div class="summary-editor-actions">
-            <button type="button" id="resetSummaryPrompt" class="link-button" hidden>Återgå till standardtexten</button>
+            <button type="button" id="resetPromptEditor" class="link-button" hidden>Återgå till standardtexten</button>
             <span class="summary-editor-spacer"></span>
-            <button type="button" id="cancelSummaryEditor" class="secondary-button">Avbryt</button>
-            <button type="button" id="applySummaryEditor">Klar</button>
+            <button type="button" id="cancelPromptEditor" class="secondary-button">Avbryt</button>
+            <button type="button" id="applyPromptEditor">Klar</button>
         </div>
     </dialog>
     

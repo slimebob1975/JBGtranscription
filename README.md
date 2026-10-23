@@ -12,8 +12,9 @@ The completed transcription and selected analyses are assembled as a **Microsoft
 - 🧠 Optional OpenAI-powered analysis:
   - Generate a **summary** from an editable instruction, chosen from a configurable set of summary types
   - Flag **suspected transcription errors**
-  - Suggest **follow-up questions**
-  - Attempt **speaker identification** (beta)
+  - Suggest **follow-up questions**, from an editable instruction
+  - Attempt **speaker identification** (beta), from an editable instruction
+  - Run a **custom analysis** ("Anpassad") from your own instruction, for example of a meeting recording
 - 📝 Generate the complete result as a structured `.docx` document
 - 🧩 Separate Word headings for each available output section
 - 🧱 Convert AI Markdown-style structure to native Word headings, lists and text formatting
@@ -36,6 +37,7 @@ After transcription and all selected analysis steps have completed, the service 
 4. **Transkription med markerade misstänkta fraser** (optional)
 5. **Uppföljningsfrågor** (optional)
 6. **Försök till identifiering av olika talare** (optional)
+7. **Anpassad analys** (optional)
 
 Each top-level output section uses a real Word heading style. AI-generated
 Markdown-like formatting is converted when the DOCX is built, so formatting
@@ -413,6 +415,11 @@ previous segment are passed as context as well, marked as already handled, so
 a reply split across a boundary is attributed correctly without appearing
 twice.
 
+The format of the dialogue - one reply per line, label, colon - is not part
+of the editable instruction. The code adds it after whatever instruction is
+used, standard or edited, so that the layout of the section cannot be broken by
+editing the text.
+
 The dialogue itself contains nothing but replies: the instruction says so
 explicitly, since a description of each speaker repeated after every segment is
 not what the section is for. The speakers are instead listed once, under
@@ -483,6 +490,33 @@ Edit the `summary_options` list in `policy/prompt_policy.json`. Each entry needs
 | `prompt` | The instruction, as a list of lines. |
 
 The order of the list is the order of the dropdown.
+
+### Editable instructions for follow-up questions and speakers
+
+The instructions for **Föreslå följdfrågor** and **Identifiera olika talare** can be edited the same way as the summary instruction, which is what makes the service usable for more than interviews: the standard texts assume an interviewer and an interviewee, while a meeting needs other questions and other speaker labels. Ticking either box reveals a **Redigera promptinstruktioner** link that opens the same editor.
+
+- The standard texts are served by `GET /analysis_prompts` from the `follow_up_questions` and `speaker_diarization` keys in `policy/prompt_policy.json`.
+- An edited text is remembered in the browser's `localStorage`; **Återgå till standardtexten** discards it. A text equal to the standard text counts as unedited.
+- Only an edited text is sent, as `questions_prompt` or `speakers_prompt`. An empty field means the standard text from the policy file, so a change there reaches every user who has not edited the text.
+- For speaker identification, the editable text only describes the recording and which labels to use. The form of the answer - one reply per line, starting with the speaker's label and a colon - is added by the code (`SPEAKER_FORMAT_SUFFIX`), together with the speaker register instruction, because the document is laid out by reading that format. An edited instruction therefore cannot break the layout.
+
+### Custom analysis (Anpassad)
+
+The last checkbox, **Anpassad**, runs an analysis the user describes. The instruction always starts with a fixed opening, `custom_analysis_preamble` in `policy/prompt_policy.json`:
+
+> Du analyserar och sammanställer transkriberad text från en ljudinspelning. Gör följande analys:
+
+The opening is shown above the text field but cannot be edited. The user writes only what follows it, and only that is sent, as `custom_prompt`; the server puts its own copy of the opening first. The result appears as **Anpassad analys** in the document, after the other analyses, and as its own row in the statistics and cost table. Long recordings are split and merged the same way as a summary.
+
+The checkbox works differently from the others:
+
+- Clicking it when unchecked opens the editor. **Klar** leaves it checked only if something has been written after the opening; **Avbryt**, Esc or an empty text leaves it unchecked.
+- Clicking it when checked unchecks it, without opening the editor. The text is kept.
+- The text is remembered in the browser's `localStorage` between visits, so clicking the box again opens the editor with the last text. The box itself always starts unchecked.
+
+The server rejects a request with the custom analysis checked but nothing written after the opening.
+
+All three instructions are capped at 20 000 characters, like the summary instruction, and only their length is written to the log, never their content. Since they are kept in the browser, on a shared computer the next user of the same browser can see them.
 
 ### How long transcriptions are handled
 
@@ -622,6 +656,7 @@ Each checkbox triggers a separate analysis step:
 - **Suspected transcription errors**: identifies phrases that may have been transcribed incorrectly.
 - **Follow-up questions**: generates questions based on the transcription.
 - **Speaker identification (beta)**: attempts to separate or identify speakers based on the transcribed content.
+- **Anpassad**: runs an analysis described by the user, after a fixed opening.
 
 Only selected/available analyses are included in the DOCX output.
 
@@ -639,11 +674,11 @@ Supported keys include:
 
 | Key | Used for |
 |---|---|
-| `short_summary` | Short summary instructions |
-| `extensive_summary` | Detailed summary instructions |
+| `summary_options` | The summary types and their instructions |
 | `suspicious_phrases` | Suspected transcription-error detection |
-| `follow_up_questions` | Follow-up question generation |
-| `speaker_diarization` | Speaker identification/segmentation |
+| `follow_up_questions` | Standard text for follow-up questions (editable in the GUI) |
+| `speaker_diarization` | Standard text for speaker identification (editable in the GUI); the answer format is added by the code |
+| `custom_analysis_preamble` | Fixed opening of the custom analysis (not editable in the GUI) |
 
 The prompt policy is loaded dynamically for each transcriber instance.
 

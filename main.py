@@ -295,6 +295,9 @@ def transcribe_audio(
     transcription_engine: str,
     questions: bool,
     speakers: bool,
+    questions_prompt: str = "",
+    speakers_prompt: str = "",
+    custom_prompt: str = "",
 ):
     logger.info(f"Transcribe audio was called with encryption key: {encryption_key != ''}")
 
@@ -346,6 +349,9 @@ def transcribe_audio(
             suggest_follow_up_questions=questions,
             analyze_speakers=speakers,
             progress_callback=progress_callback,
+            follow_up_prompt=questions_prompt,
+            speaker_prompt=speakers_prompt,
+            custom_analysis_prompt=custom_prompt,
         )
 
         clean_up_audio_file(Path(file_path))
@@ -427,6 +433,16 @@ def get_summary_prompts():
     }
 
 
+# Standard texts for the other editable analyses. The custom analysis has a
+# fixed opening that the user cannot change; only what follows it is sent.
+@app.get("/analysis_prompts")
+def get_analysis_prompts():
+    return {
+        **JBGtranscriber.JBGtranscriber.analysis_prompt_defaults(),
+        "max_length": MAX_SUMMARY_PROMPT_CHARS,
+    }
+
+
 # To find and log the current user
 @app.get("/me")
 def get_user(request: Request):
@@ -452,7 +468,13 @@ async def upload_audio(
     fast_engine: bool = Form(True),
     suspicious: bool = Form(False),   # retired; accepted as a synonym below
     questions: bool = Form(False),
-    speakers: bool = Form(False)
+    speakers: bool = Form(False),
+    # Empty means the standard text from the policy file.
+    questions_prompt: str = Form(""),
+    speakers_prompt: str = Form(""),
+    # The custom analysis: what the user wrote after the fixed opening.
+    custom_analysis: bool = Form(False),
+    custom_prompt: str = Form(""),
 ):
     logger.info(f"Upload endpoint received encryption_key: {'✅ present' if encryption_key else '❌ missing or empty'}")
     logger.info(f"Length of encryption_key: {len(encryption_key)} characters")
@@ -523,9 +545,29 @@ async def upload_audio(
     if not summarize:
         summary_prompt = ""
 
+    questions_prompt = (questions_prompt or "").strip() if questions else ""
+    speakers_prompt = (speakers_prompt or "").strip() if speakers else ""
+    custom_prompt = (custom_prompt or "").strip() if custom_analysis else ""
+    for name, text in (("Follow-up question", questions_prompt),
+                       ("Speaker", speakers_prompt),
+                       ("Custom analysis", custom_prompt)):
+        if len(text) > MAX_SUMMARY_PROMPT_CHARS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{name} instruction exceeds {MAX_SUMMARY_PROMPT_CHARS} characters.",
+            )
+    if custom_analysis and not custom_prompt:
+        raise HTTPException(
+            status_code=400,
+            detail="Custom analysis needs an instruction after the fixed opening.",
+        )
+
     # The instruction may contain case-specific context, so only its size is
     # logged, never its content.
     summary_prompt_source = "egen text" if summary_prompt else "standardtext"
+
+    def describe(text):
+        return f"egen text, {len(text)} tecken" if text else "standardtext"
 
     logger.info(f"""
           OpenAI API key was provided: {api_key != "sk-..."}\n
@@ -533,8 +575,9 @@ async def upload_audio(
           OpenAI API tasks: \n
           \tSummary: {summarize} ({summary_style}, {summary_prompt_source}, {len(summary_prompt)} tecken)\n
           \tTranscription format: {transcription_format} \n          \tTranscription accuracy: {transcription_accuracy} \n          \tTranscription engine: {transcription_engine} \n
-          \tGenerate questions: {questions} \n 
-          \tSpeaker detection: {speakers}
+          \tGenerate questions: {questions} ({describe(questions_prompt)}) \n 
+          \tSpeaker detection: {speakers} ({describe(speakers_prompt)})\n
+          \tCustom analysis: {bool(custom_prompt)} ({len(custom_prompt)} tecken)
           """)
 
     file_id = str(uuid.uuid4())
@@ -591,7 +634,10 @@ async def upload_audio(
         transcription_accuracy,
         transcription_engine,
         questions,
-        speakers
+        speakers,
+        questions_prompt,
+        speakers_prompt,
+        custom_prompt,
     )
 
     return JSONResponse({"message": "File uploaded, processing started.", "file_id": file_id})
