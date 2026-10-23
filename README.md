@@ -13,7 +13,7 @@ The completed transcription and selected analyses are assembled as a **Microsoft
   - Generate a **summary** from an editable instruction, chosen from a configurable set of summary types
   - Flag **suspected transcription errors**
   - Suggest **follow-up questions**, from an editable instruction
-  - Attempt **speaker identification** (beta), from an editable instruction
+  - Show the transcription **with speaker labels** (beta), from an editable instruction
   - Run a **custom analysis** ("Anpassad") from your own instruction, for example of a meeting recording
 - 📝 Generate the complete result as a structured `.docx` document
 - 🧩 Separate Word headings for each available output section
@@ -31,13 +31,11 @@ The completed transcription and selected analyses are assembled as a **Microsoft
 
 After transcription and all selected analysis steps have completed, the service creates a structured Word document containing:
 
-1. **Rå transkribering**
-2. **Transkribering med tidsstämplar**
-3. **Sammanfattning** (optional)
-4. **Transkription med markerade misstänkta fraser** (optional)
-5. **Uppföljningsfrågor** (optional)
-6. **Försök till identifiering av olika talare** (optional)
-7. **Anpassad analys** (optional)
+1. **The transcription**, in the chosen presentation: raw text, with timestamps, with suspected errors marked, or with speaker labels (beta)
+2. **Sammanfattning** (optional)
+3. **Uppföljningsfrågor** (optional)
+4. **Anpassad analys** (optional)
+5. **Om transkriberingen** and **Statistik**
 
 Each top-level output section uses a real Word heading style. AI-generated
 Markdown-like formatting is converted when the DOCX is built, so formatting
@@ -402,6 +400,14 @@ document falls back to the raw text with a line saying why.
 
 ### Speaker identification
 
+Speaker identification is one of the four presentations of the transcription,
+**Med talarangivelser (beta)**, rather than a separate analysis. The section
+then shows the whole text as a dialogue, with the identified speakers listed
+at the end, and like the marked presentation it cannot be combined with
+another one. If identification fails, the raw text is shown with a note. An
+old client that still posts `speakers=true` with the raw presentation is read
+as choosing this one.
+
 A long recording is labelled segment by segment, which raises a problem the
 model cannot solve on its own: each segment is processed in a separate call, so
 "Intervjuobjekt 1" in one segment need not be the same person as in the next.
@@ -431,8 +437,7 @@ otherwise be left sitting in the middle of the dialogue. If several blocks turn
 up in one answer, all of them are removed and the last is used.
 
 The raw register is never part of the result document. It is available afterwards
-as `speaker_register` on the transcriber, which is what a per-speaker analysis
-will be built on.
+as `speaker_register` on the transcriber.
 
 Segment size matters more here than for other rewriting work. The same
 recording processed in a single call reported 7, 6 and 6 speakers across three
@@ -491,9 +496,18 @@ Edit the `summary_options` list in `policy/prompt_policy.json`. Each entry needs
 
 The order of the list is the order of the dropdown.
 
+### Analyses on the marked text
+
+When **Med markering av misstänkta fel** is chosen, the summary, the follow-up questions and the custom analysis work from the marked text rather than the original. Each marking holds both the original wording and the suggested correction, as in `[FEL?]lufflarlagen (Kanske: LAS-lagen)[/FEL?]`, so the analysis can use whichever is more plausible instead of building on a transcription error.
+
+- Only then does the code add an instruction about the markers (`MARKED_TEXT_NOTE`), so analyses of unmarked text carry no rule about markers that are not there. It tells the model that the suggestions are unreviewed guesses, to use the reading that fits the context best, not to present an uncertain name or number as certain, and not to reproduce the markers.
+- Speaker identification is a presentation of its own, so it cannot be combined with marking.
+- If marking fails, the analyses fall back to the original text.
+- **Om transkriberingen** in the document states which analyses were based on the marked text.
+
 ### Editable instructions for follow-up questions and speakers
 
-The instructions for **Föreslå följdfrågor** and **Identifiera olika talare** can be edited the same way as the summary instruction, which is what makes the service usable for more than interviews: the standard texts assume an interviewer and an interviewee, while a meeting needs other questions and other speaker labels. Ticking either box reveals a **Redigera promptinstruktioner** link that opens the same editor.
+The instructions for **Föreslå följdfrågor** and for the **Med talarangivelser** presentation can be edited the same way as the summary instruction, which is what makes the service usable for more than interviews: the standard texts assume an interviewer and an interviewee, while a meeting needs other questions and other speaker labels. Ticking the follow-up box, or choosing the speaker presentation, reveals a **Redigera promptinstruktioner** link that opens the same editor.
 
 - The standard texts are served by `GET /analysis_prompts` from the `follow_up_questions` and `speaker_diarization` keys in `policy/prompt_policy.json`.
 - An edited text is remembered in the browser's `localStorage`; **Återgå till standardtexten** discards it. A text equal to the standard text counts as unedited.
@@ -664,7 +678,6 @@ Each checkbox triggers a separate analysis step:
 - **Summary**: produces a short or extensive summary.
 - **Suspected transcription errors**: identifies phrases that may have been transcribed incorrectly.
 - **Follow-up questions**: generates questions based on the transcription.
-- **Speaker identification (beta)**: attempts to separate or identify speakers based on the transcribed content.
 - **Anpassad**: runs an analysis described by the user, after a fixed opening.
 
 Only selected/available analyses are included in the DOCX output.

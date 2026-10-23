@@ -3,7 +3,7 @@ Modellmenyn och priserna för OpenAI-modellerna, från policy/model_prices.json.
 
 Filen läses en gång per process, alltså vid varje omstart, och kontrolleras
 då av validate_price_table(). OpenAI har inget API för priser, så de förs in
-för hand från prislistan; kontrollen varnar när ett pris saknas eller när
+för hand från prislistan. Kontrollen varnar när ett pris saknas eller när
 datumet för senaste avstämning är gammalt.
 
 Kostnaden räknas per anrop:
@@ -55,13 +55,13 @@ def read_price_table(path: Path = PRICES_PATH) -> dict:
             isinstance(entry.get(f), (int, float)) and entry.get(f) >= 0 for f in _PRICE_FIELDS
         ):
             table["errors"].append(
-                f"Priset för {name} är ofullständigt; det behöver in, cachad och ut som tal."
+                f"Priset för {name} är ofullständigt. Det behöver in, cachad och ut som tal."
             )
             continue
         table["prices"][name] = {f: float(entry[f]) for f in _PRICE_FIELDS}
 
     if not table["menu"]:
-        table["errors"].append("_i_menyn saknas eller är tom; menyn visar bara reservmodellen.")
+        table["errors"].append("_i_menyn saknas eller är tom. Menyn visar bara reservmodellen.")
         table["menu"] = list(FALLBACK_MENU)
     if table["default"] not in table["menu"]:
         table["default"] = table["menu"][0]
@@ -108,7 +108,7 @@ def validate_price_table(table: dict = None, today: date = None) -> list:
 
     for model in table["menu"]:
         if price_for(model, table) is None:
-            warnings.append(f"Modellen {model} finns i menyn men saknar pris; kostnad visas inte för den.")
+            warnings.append(f"Modellen {model} finns i menyn men saknar pris – kostnad visas inte för den.")
 
     checked = table["checked"]
     if not checked:

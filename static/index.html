@@ -42,7 +42,7 @@
                 <option value="bas">bas</option>
                 <option value="liten">liten</option>
             </select>
-            <label id="fastEngineLabel" title="Kör samma modell genom en snabbare motor. Ungefär dubbelt så snabbt; skillnaderna mot den långsammare motorn gäller skiljetecken och utfyllnadsord, inte innehåll"><input type="checkbox" id="fastEngine" checked> Snabb variant</label>
+            <label id="fastEngineLabel" title="Kör samma modell genom en snabbare motor. Ungefär dubbelt så snabbt. Skillnaderna mot den långsammare motorn gäller skiljetecken och utfyllnadsord, inte innehåll"><input type="checkbox" id="fastEngine" checked> Snabb variant</label>
             </div>
             <label>Ange hur du vill ha den transkriberade texten:</label>
             <div class="transcription-format-choice">
@@ -51,7 +51,15 @@
                 <label><input type="radio" name="transcriptionFormat" value="timestamps"
                        title="Hela texten med tidsstämplar i stället för löpande text"> Med tidsstämplar</label>
                 <label><input type="radio" name="transcriptionFormat" value="marked"
-                       title="Hela texten med misstänkta transkriberingsfel gulmarkerade och förslag på rättelse inom (Kanske: ...). Kräver API-nyckel"> Med markering av misstänkta fel</label>
+                       title="Hela texten med misstänkta transkriberingsfel gulmarkerade och förslag på rättelse inom (Kanske: ...). Sammanfattning, följdfrågor och anpassad analys bygger då på den markerade texten, som innehåller både den ursprungliga lydelsen och förslaget. Kräver API-nyckel"> Med markering av misstänkta fel</label>
+                <label><input type="radio" name="transcriptionFormat" value="speakers"
+                       title="Hela texten som en dialog, med en talarbeteckning före varje replik och de identifierade talarna listade sist. Beteckningarna bygger på ordval och sammanhang och kan bli fel. Du kan ändra instruktionen, till exempel för en mötesinspelning. Kräver API-nyckel"> Med talarangivelser (beta)</label>
+            </div>
+            <div id="speakersOptions" class="summary-options" hidden>
+                <div class="summary-prompt-footer">
+                    <button type="button" id="openSpeakersEditor" class="link-button">Redigera promptinstruktioner</button>
+                    <span id="speakersPromptState" class="summary-prompt-state" hidden></span>
+                </div>
             </div>
         </fieldset>
 
@@ -82,14 +90,7 @@
                     <span id="questionsPromptState" class="summary-prompt-state" hidden></span>
                 </div>
             </div>
-            <label><input type="checkbox" id="optSpeakers" title="Återger hela texten med talarbeteckningar och listar de identifierade talarna sist. Beteckningarna bygger på ordval och sammanhang och kan bli fel. Du kan ändra instruktionen, till exempel för en mötesinspelning"> Identifiera olika talare baserat på innehåll (beta)</label><br>
-            <div id="speakersOptions" class="summary-options" hidden>
-                <div class="summary-prompt-footer">
-                    <button type="button" id="openSpeakersEditor" class="link-button">Redigera promptinstruktioner</button>
-                    <span id="speakersPromptState" class="summary-prompt-state" hidden></span>
-                </div>
-            </div>
-            <label><input type="checkbox" id="optCustom" title="En egen analys, till exempel av en mötesinspelning. Klicka för att skriva vad som ska göras; rutan förblir ikryssad bara om du har skrivit något"> Anpassad</label>
+            <label><input type="checkbox" id="optCustom" title="En egen analys, till exempel av en mötesinspelning. Klicka för att skriva vad som ska göras. Rutan förblir ikryssad bara om du har skrivit något"> Anpassad</label>
         </fieldset>
         
         <!-- Display button for uploading file -->

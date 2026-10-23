@@ -16,7 +16,7 @@
     "Priserna gäller korta kontext (under 272K tokens) och standardnivån, inte",
     "batch, flex eller fast mode. Kontrollera mot aktuell prislista.",
     "OBS: 'cache writes' för gpt-5.6-familjen och gpt-6-astra debiteras separat",
-    "och ingår inte i uppskattningen; API:et rapporterar dem inte per anrop.",
+    "och ingår inte i uppskattningen – API:et rapporterar dem inte per anrop.",
     "Pro-modellerna har inget publicerat cache-pris. De får cachad = in, så att",
     "kostnaden aldrig underskattas.",
     "",

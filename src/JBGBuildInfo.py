@@ -5,7 +5,7 @@ avsnittet "Om transkriberingen" i resultatdokumentet.
 - Versionsnumret läses från filen VERSION i repots rot.
 - I den driftsatta appen läses commit, gren och miljö från build_info.json,
   som byggsteget skriver (scripts/write_build_info.py).
-- Lokalt, utan build_info.json, frågas git om commit; finns inte git heller
+- Lokalt, utan build_info.json, frågas git om commit. Finns inte git heller
   anges bara versionen och miljön "lokal".
 """
 
@@ -62,5 +62,5 @@ def read_build_info(root: Path = ROOT) -> dict:
 
 @lru_cache(maxsize=1)
 def get_build_info() -> dict:
-    """Läses en gång per process; versionen ändras bara vid ny driftsättning."""
+    """Läses en gång per process. Versionen ändras bara vid ny driftsättning."""
     return read_build_info()

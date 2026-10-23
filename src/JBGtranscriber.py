@@ -234,6 +234,23 @@ SPEAKER_FORMAT_SUFFIX = (
     "varje replik. Hitta inte på namn. Skriv inget utanför själva dialogen."
 )
 
+# Added to the instruction of an analysis that works from the marked text,
+# and only then, so that instructions for unmarked text carry no rule about
+# markers that are not there. The marked text holds both the original wording
+# and the suggestion, so the model is asked to weigh them, not to trust the
+# suggestion.
+MARKED_TEXT_NOTE = (
+    "OM TEXTENS MARKERINGAR:\n"
+    "Texten har gåtts igenom efter misstänkta transkriberingsfel. Ett misstänkt "
+    "fel står inom [FEL?] och [/FEL?], med den ursprungliga lydelsen först och "
+    "ett förslag på trolig lydelse inom (Kanske: ...), till exempel: "
+    "[FEL?]lufflarlagen (Kanske: LAS-lagen)[/FEL?]. Förslagen är gissningar som "
+    "ingen har granskat. Använd i varje fall den lydelse, ursprunglig eller "
+    "föreslagen, som är mest sannolik i sammanhanget. Är ett namn, en siffra "
+    "eller en annan viktig detalj fortfarande osäker, återge den inte som säker. "
+    "Återge inte markörerna och nämn inte att texten varit markerad."
+)
+
 # The fixed opening of the custom analysis, used if the policy file lacks it.
 DEFAULT_CUSTOM_ANALYSIS_PREAMBLE = (
     "Du analyserar och sammanställer transkriberad text från en ljudinspelning. "
@@ -262,13 +279,14 @@ SPEAKER_CONTEXT_SENTENCES = 3
 
 # How the transcribed text is presented in the result document. Exactly one
 # form is included; the three are mutually exclusive.
-TRANSCRIPTION_FORMATS = ("raw", "timestamps", "marked")
+TRANSCRIPTION_FORMATS = ("raw", "timestamps", "marked", "speakers")
 DEFAULT_TRANSCRIPTION_FORMAT = "raw"
 
 TRANSCRIPTION_FORMAT_HEADINGS = {
     "raw": "Transkribering",
     "timestamps": "Transkribering med tidsstämplar",
     "marked": "Transkribering med markerade misstänkta fel",
+    "speakers": "Transkribering med talarangivelser",
 }
 
 # Upper bound on a user-supplied summary instruction.
@@ -476,6 +494,8 @@ class JBGtranscriber():
         self.marked_text = ""
         self.follow_up_questions = ""
         self.custom_analysis = ""
+        # Analyses that worked from the marked text, for "Om transkriberingen".
+        self.analyses_on_marked_text = []
         self.analyze_speakers = ""
 
     # Resolved from the package location rather than the current working
@@ -608,6 +628,7 @@ class JBGtranscriber():
     speaker_register = {}
     custom_analysis = ""
     transcription_from_cache = False
+    analyses_on_marked_text = []
 
     def load_prompt_policy(self):
         return JBGtranscriber.load_policy_file()
@@ -863,6 +884,26 @@ class JBGtranscriber():
         logger.info(f"Using default summary instruction for option '{option_id}'.")
         return option["prompt"]
 
+    def _analysis_input(self, analysis_name):
+        """The text a condensing analysis works from, and a note for its instruction.
+
+        When suspected errors have been marked, the summary, follow-up
+        questions and custom analysis work from the marked text, which holds
+        both the original wording and the suggested correction. If marking was
+        not chosen or failed, they work from the original transcription.
+        Speaker identification is a presentation of its own and cannot be
+        combined with marking.
+        """
+        marked = (self.__dict__.get("marked_text") or "").strip()
+        if not marked:
+            return self.transcription, ""
+        if "analyses_on_marked_text" not in self.__dict__:
+            self.analyses_on_marked_text = []
+        if analysis_name not in self.analyses_on_marked_text:
+            self.analyses_on_marked_text.append(analysis_name)
+        logger.info(f"{analysis_name} bygger på texten med markerade misstänkta fel.")
+        return marked, "\n\n" + MARKED_TEXT_NOTE
+
     def generate_summary(self, style=None, custom_prompt=None):
         """Generate a summary using either a default or a user-edited instruction.
 
@@ -879,21 +920,23 @@ class JBGtranscriber():
             return
 
         try:
-            self.summary = self._summarize(instructions)
+            text, note = self._analysis_input("sammanfattningen")
+            self.summary = self._summarize(instructions + note, text)
         except Exception as e:
             logger.error(f" Summary generation failed: {e}")
             self.summary = "Sammanfattning var inte tillgänglig"
 
-    def _summarize(self, instructions):
+    def _summarize(self, instructions, text=None):
         """Run the summary, lowering the token budget if the API rejects the size."""
 
+        text = self.transcription if text is None else text
         enc = self._get_encoder_for_segmentation()
         budget = self._resolve_input_token_budget()
         downshifts = 0
 
         while True:
             available = self._available_input_tokens(instructions, enc, budget)
-            segments = self._split_into_segments(self.transcription, enc, max_tokens=available)
+            segments = self._split_into_segments(text, enc, max_tokens=available)
 
             try:
                 if len(segments) == 1:
@@ -902,7 +945,7 @@ class JBGtranscriber():
                     )
                     return self.call_openai(
                         instructions=instructions,
-                        input_message=self.transcription,
+                        input_message=text,
                         max_output_tokens=self._resolve_output_token_limit(),
                     ).content.strip()
 
@@ -1438,9 +1481,10 @@ class JBGtranscriber():
             ) or JBGtranscriber.policy_text(
                 self.prompt_policy, "follow_up_questions", "Generera uppföljningsfrågor."
             )
+            text, note = self._analysis_input("följdfrågorna")
             self.follow_up_questions = self._condense_whole_text(
-                instructions,
-                self.transcription,
+                instructions + note,
+                text,
                 "Förslag på uppföljningsfrågor",
                 reduce_suffix=(
                     "Nedan följer frågeförslag från flera delar av samma inspelning. "
@@ -1468,9 +1512,10 @@ class JBGtranscriber():
             self.prompt_policy, "custom_analysis_preamble", DEFAULT_CUSTOM_ANALYSIS_PREAMBLE
         )
         try:
+            text, note = self._analysis_input("den anpassade analysen")
             self.custom_analysis = self._condense_whole_text(
-                preamble + "\n" + addition,
-                self.transcription,
+                preamble + "\n" + addition + note,
+                text,
                 "Anpassad analys",
             )
         except Exception as e:
@@ -1682,7 +1727,9 @@ class JBGtranscriber():
             dialogue = merged
 
             if not self._rewrite_kept_the_text("Talaranalys", self.transcription, dialogue):
-                self.analyze_speakers = "Försöket till identifiering av talare gav ofullständig text"
+                # Left empty, like a failed marking: as the chosen presentation
+                # it would otherwise replace the whole transcription.
+                self.analyze_speakers = ""
                 self.speaker_register = {}
                 return
 
@@ -1692,7 +1739,7 @@ class JBGtranscriber():
 
         except Exception as e:
             logger.error(f"An error occurred while analyzing speakers: {e}")
-            self.analyze_speakers = "Försöket till identifiering av talare misslyckades"
+            self.analyze_speakers = ""
             self.speaker_register = {}
 
      # Some internal help functions
@@ -2341,6 +2388,19 @@ class JBGtranscriber():
                 total += cost
         return (None if unpriced else total), unpriced
 
+    def _marked_text_note(self):
+        """Which analyses worked from the marked text, for "Om transkriberingen"."""
+        used = self.__dict__.get("analyses_on_marked_text") or []
+        if not used:
+            return ""
+        names = used[0] if len(used) == 1 else ", ".join(used[:-1]) + " och " + used[-1]
+        note = (
+            f"{names[0].upper() + names[1:]} bygger på texten med markerade misstänkta "
+            "fel, där varje markering innehåller både den ursprungliga lydelsen och ett "
+            "föreslaget alternativ."
+        )
+        return note
+
     def _cost_note(self):
         """One sentence for "Om transkriberingen" on what the OpenAI calls cost."""
         calls = self.__dict__.get("model_calls", [])
@@ -2414,6 +2474,9 @@ class JBGtranscriber():
         if self.transcription_from_cache:
             line += " Transkriberingen återanvändes från en tidigare körning av samma ljudfil."
         parts = [line]
+        marked_note = self._marked_text_note()
+        if marked_note:
+            parts.append(marked_note)
         cost_note = self._cost_note()
         if cost_note:
             parts.append(cost_note)
@@ -2430,10 +2493,11 @@ class JBGtranscriber():
     def _transcription_section(self):
         """Return the single transcription section for the result document.
 
-        The three presentations are mutually exclusive. If the chosen one is
-        unavailable - marking failed, or the model returned no timestamps - the
-        raw text is used instead and the document says so, rather than leaving
-        the reader with an error message where the transcription should be.
+        The four presentations are mutually exclusive. If the chosen one is
+        unavailable - marking or speaker identification failed, or the model
+        returned no timestamps - the raw text is used instead and the document
+        says so, rather than leaving the reader with an error message where the
+        transcription should be.
         """
         chosen = self.transcription_format if self.transcription_format in TRANSCRIPTION_FORMATS \
             else DEFAULT_TRANSCRIPTION_FORMAT
@@ -2442,6 +2506,7 @@ class JBGtranscriber():
             "raw": self.transcription,
             "timestamps": self.transcription_w_timestamps,
             "marked": self.marked_text,
+            "speakers": self.__dict__.get("analyze_speakers", ""),
         }.get(chosen, self.transcription)
 
         if not (content or "").strip() and chosen != "raw":
@@ -2451,6 +2516,7 @@ class JBGtranscriber():
             note = {
                 "timestamps": "[Tidsstämplar var inte tillgängliga. Rå text visas i stället.]",
                 "marked": "[Markering av misstänkta fel kunde inte genomföras. Rå text visas i stället.]",
+                "speakers": "[Talaridentifieringen kunde inte genomföras. Rå text visas i stället.]",
             }.get(chosen, "")
             body = (self.transcription or "").strip()
             return (
@@ -2459,7 +2525,7 @@ class JBGtranscriber():
                 "plain",
             )
 
-        render_mode = "marked" if chosen == "marked" else "plain"
+        render_mode = {"marked": "marked", "speakers": "speakers"}.get(chosen, "plain")
         return (TRANSCRIPTION_FORMAT_HEADINGS[chosen], content, render_mode)
 
     def write_to_output_file(self):
@@ -2483,7 +2549,6 @@ class JBGtranscriber():
             self._transcription_section(),
             ("Sammanfattning", self.summary, "structured"),
             ("Uppföljningsfrågor", self.follow_up_questions, "structured"),
-            ("Försök till identifiering av olika talare", self.analyze_speakers, "speakers"),
             ("Anpassad analys", self.custom_analysis, "structured"),
             # Provenance and statistics belong after the content, not between
             # the transcription and the analyses.
@@ -2549,7 +2614,7 @@ class JBGtranscriber():
         transcription_engine=DEFAULT_TRANSCRIPTION_ENGINE,
         find_suspicious_phrases=None,
         suggest_follow_up_questions=False,
-        analyze_speakers=False,
+        analyze_speakers=None,
         progress_callback=None,
         follow_up_prompt=None,
         speaker_prompt=None,
@@ -2578,6 +2643,9 @@ class JBGtranscriber():
         )
         if find_suspicious_phrases is None:
             find_suspicious_phrases = self.transcription_format == "marked"
+        # Speaker identification is the work behind the "speakers" presentation.
+        if analyze_speakers is None:
+            analyze_speakers = self.transcription_format == "speakers"
         
         def report(msg):
             logger.info(msg)
@@ -2598,6 +2666,11 @@ class JBGtranscriber():
         if find_suspicious_phrases:
             report(f"Letar misstänkta fel...")
             self.find_suspicious_phrases()
+
+        # Speaker identification likewise produces the transcription section
+        if analyze_speakers:
+            report(f"Försöker identifiera olika talare...")
+            self.do_analyze_speakers_splitted(custom_prompt=speaker_prompt)
         
         # Generate a summary if requested
         if generate_summary:
@@ -2609,10 +2682,6 @@ class JBGtranscriber():
             report(f"Föreslår uppföljningsfrågor...")
             self.suggest_follow_up_questions(custom_prompt=follow_up_prompt)
             
-        # Analyze speakers if requested
-        if analyze_speakers:
-            report(f"Försöker identifiera olika talare...")
-            self.do_analyze_speakers_splitted(custom_prompt=speaker_prompt)
 
         # The user's own analysis, last as in the GUI
         if (custom_analysis_prompt or "").strip():
@@ -2682,9 +2751,10 @@ def main():
         transcriber.perform_transcription_steps(
             generate_summary=True,
             summary_style=summary_style,
+            # Speaker identification is a presentation of its own now, so it
+            # cannot be added to the marked presentation here.
             transcription_format="marked",
             suggest_follow_up_questions=True,
-            analyze_speakers=True
         )
 
     

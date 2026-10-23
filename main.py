@@ -515,14 +515,18 @@ async def upload_audio(
         else:
             raise HTTPException(status_code=400, detail="Invalid summary style.")
 
-    # The three presentations replaced a separate "mark suspected errors"
-    # checkbox. An old client that still posts suspicious=true is read as
-    # asking for the marked presentation.
+    # The presentations replaced separate checkboxes for marking suspected
+    # errors and for identifying speakers. An old client that still posts
+    # suspicious=true or speakers=true is read as asking for that
+    # presentation, unless it chose another one, which cannot be combined.
     transcription_format = (transcription_format or "").strip().lower()
     if not transcription_format:
         transcription_format = "marked" if suspicious else DEFAULT_TRANSCRIPTION_FORMAT
+    if speakers and transcription_format == DEFAULT_TRANSCRIPTION_FORMAT:
+        transcription_format = "speakers"
     if transcription_format not in TRANSCRIPTION_FORMATS:
         raise HTTPException(status_code=400, detail="Invalid transcription format.")
+    speakers = transcription_format == "speakers"
 
     # The accuracy choice is a ceiling on the Whisper model. An empty value
     # means the default; an unknown one is rejected rather than guessed at.

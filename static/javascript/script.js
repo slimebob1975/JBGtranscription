@@ -725,24 +725,39 @@ document.addEventListener("DOMContentLoaded", () => {
     const checkboxes = [
         document.getElementById("optSummary"),
         document.getElementById("optQuestions"),
-        document.getElementById("optSpeakers"),
         document.getElementById("optCustom"),
     ];
 
-    // Marking suspected errors is done by the language model, so that
-    // presentation needs an API key. Raw text and timestamps do not.
-    const markedFormatRadio = document.querySelector('input[name="transcriptionFormat"][value="marked"]');
+    // Marking suspected errors and identifying speakers are done by the
+    // language model, so those presentations need an API key. Raw text and
+    // timestamps do not.
+    const modelFormatRadios = ["marked", "speakers"].map(
+        value => document.querySelector(`input[name="transcriptionFormat"][value="${value}"]`)
+    );
+    const formatRadios = document.querySelectorAll('input[name="transcriptionFormat"]');
+    const rawFormatRadio = document.querySelector('input[name="transcriptionFormat"][value="raw"]');
+
+    // The Redigera link for the speaker instruction belongs to that presentation.
+    const refreshSpeakersOptions = () => {
+        const chosen = document.querySelector('input[name="transcriptionFormat"]:checked');
+        const show = chosen !== null && chosen.value === "speakers";
+        document.getElementById("speakersOptions").hidden = !show;
+        document.getElementById("openSpeakersEditor").disabled = !show;
+    };
+    formatRadios.forEach(radio => radio.addEventListener("change", refreshSpeakersOptions));
 
     apiKeyInput.addEventListener("input", () => {
         const hasKey = apiKeyInput.value.trim().length > 0;
         checkboxes.forEach(cb => cb.disabled = !hasKey);
-        markedFormatRadio.disabled = !hasKey;
-        if (!hasKey && markedFormatRadio.checked) {
-            document.querySelector('input[name="transcriptionFormat"][value="raw"]').checked = true;
-        }
+        modelFormatRadios.forEach(radio => {
+            radio.disabled = !hasKey;
+            if (!hasKey && radio.checked) rawFormatRadio.checked = true;
+        });
+        refreshSpeakersOptions();
     });
 
-    markedFormatRadio.disabled = apiKeyInput.value.trim().length === 0;
+    modelFormatRadios.forEach(radio => { radio.disabled = apiKeyInput.value.trim().length === 0; });
+    refreshSpeakersOptions();
 
     // Summary checkbox: reveal the style choice and the editable instruction
     const summaryCheckbox = document.getElementById("optSummary");
@@ -755,9 +770,8 @@ document.addEventListener("DOMContentLoaded", () => {
         document.getElementById("openSummaryEditor").disabled = !show;
     });
 
-    // Follow-up questions and speakers: reveal their Redigera link when checked.
-    [["optQuestions", "questionsOptions", "openQuestionsEditor"],
-     ["optSpeakers", "speakersOptions", "openSpeakersEditor"]].forEach(([boxId, blockId, linkId]) => {
+    // Follow-up questions: reveal the Redigera link when checked.
+    [["optQuestions", "questionsOptions", "openQuestionsEditor"]].forEach(([boxId, blockId, linkId]) => {
         const box = document.getElementById(boxId);
         box.addEventListener("change", () => {
             document.getElementById(blockId).hidden = !box.checked;
@@ -822,7 +836,6 @@ async function uploadFile() {
     document.getElementById("fastEngine").disabled = true;
     document.getElementById("optQuestions").disabled = true;
     document.getElementById("openQuestionsEditor").disabled = true;
-    document.getElementById("optSpeakers").disabled = true;
     document.getElementById("openSpeakersEditor").disabled = true;
     document.getElementById("optCustom").disabled = true;
     document.getElementById("button").disabled = true;
@@ -883,10 +896,11 @@ async function uploadFile() {
         document.querySelector('input[name="transcriptionFormat"]:checked')?.value || "raw"
     );
     const questionsChecked = document.getElementById("optQuestions").checked;
-    const speakersChecked = document.getElementById("optSpeakers").checked;
+    // Speaker identification is a presentation of the text, chosen above.
+    const speakersChecked =
+        document.querySelector('input[name="transcriptionFormat"]:checked')?.value === "speakers";
     const customChecked = document.getElementById("optCustom").checked;
     formData.append("questions", questionsChecked);
-    formData.append("speakers", speakersChecked);
     // Empty means the standard text; only an edited text is sent.
     formData.append("questions_prompt", questionsChecked ? questionsPromptText : "");
     formData.append("speakers_prompt", speakersChecked ? speakersPromptText : "");

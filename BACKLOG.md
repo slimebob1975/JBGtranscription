@@ -7,47 +7,35 @@ The version number is kept only in `VERSION`, and each release is tagged
 
 ## Planned improvments
 
-- [ ] Consider summarising the marked-up text rather than the original when
-  "Med markering av misstänkta fel" is chosen, so the summary works from the
-  corrected reading instead of the suspected mistranscription. Marking
-  already runs before the summary, so the text is available. Two things to
-  settle first:
-
-  - The prompts are not hidden: what is in `policy/prompt_policy.json` is
-    what the model receives, apart from the map and reduce instructions the
-    code appends when a transcription has to be split. An instruction about
-    `[FEL?]` markers should therefore be appended by the code only when the
-    marked text is actually being summarised, so the other summary types do
-    not carry a rule about markers that are not there. Wording along the
-    lines of: the text may contain `[FEL?]...[/FEL?]` around a suspected
-    mistranscription followed by `(Kanske: ...)` with a suggested reading;
-    use whichever reading is most plausible and do not reproduce the
-    markers.
-  - The suggestions inside the markers are the model's own guesses, which
-    nobody has reviewed. Summarising them means a second model builds on a
-    first model's corrections. For a supervisory file that may argue for
-    keeping the original as the summary input, or for making it a choice
-    rather than automatic.
-- [ ] Offer the speaker-labelled text as a fourth presentation of the
-  transcription ("Med talarangivelser") rather than as a separate section,
-  once the per-speaker analysis is in place.
-- [ ] Add a factual per-speaker analysis on top of stable identities: which
-  topics each speaker returned to, what they stated, roughly how much they
-  spoke. It must stay descriptive, never evaluative - "Intervjuperson 1
-  återkom ofta till behovet av säkra rutiner för AI-utveckling", not
-  "Intervjuperson 1 verkar orolig för att rutinerna inte fungerar". The
-  transcript does not support inferences about a person's state of mind,
-  and the subjects are identifiable staff in a supervisory file.
-- [ ] Show an estimated segment count, and from it a cost, before upload. The
-  page can read the audio duration before uploading; a typical speaking rate
-  then gives an estimated token count, and the prices are now in
-  `policy/model_prices.json`. It is an estimate with a margin and should be
-  presented as one.
+- [ ] Consider removing speaker identification completely. The "Fråga–svar"
+  summary type now covers most of what it was for, and it remains a beta
+  whose labels can be wrong. Removing it means the "Med talarangivelser"
+  presentation and its editor target, `speaker_diarization` in the policy,
+  `SPEAKER_FORMAT_SUFFIX`, the register handling and its constants,
+  `JBG_DIARIZATION_SEGMENT_TOKENS`, the README section, and the server's
+  mapping of an old `speakers=true` request. Saved speaker instructions in
+  users' browsers would simply no longer be used.
 - [ ] Investigate if batching and moving window can improve execution time for the transcription step without big loss of accuracy
-- [ ] Investigare if a faster-Whisper model can improve execution time without big loss of accuracy
 
 ## Solved
 
+- [X] Make speaker identification the fourth presentation of the
+  transcription ("Med talarangivelser (beta)") instead of a separate
+  checkbox and section. The dialogue now replaces the transcription section,
+  a failed identification falls back to the raw text with a note, and the
+  speaker instruction's Redigera link sits under the presentation choice. The
+  per-speaker analysis that was planned on top of it was dropped, as was the
+  estimate before upload; the faster-whisper investigation was settled by
+  the fast engine
+- [X] Base the summary, follow-up questions and custom analysis on the marked
+  text when "Med markering av misstänkta fel" is chosen. The marked text holds
+  both the original wording and the suggested correction, so the analysis can
+  weigh them rather than inherit a transcription error. The code adds an
+  instruction about the markers only when they are present, telling the model
+  that the suggestions are unreviewed and not to present an uncertain detail
+  as certain. Speaker identification keeps the original text, since markers
+  do not survive its rewrite reliably. The tooltip and "Om transkriberingen"
+  say which analyses were affected
 - [X] Let the user save their own edited instructions under a name, for all
   four editable instructions, each with its own list. Kept in the browser
   only, by choice: nothing is stored on the server, and options for the
