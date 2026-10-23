@@ -19,6 +19,12 @@ The version number is kept only in `VERSION`, and each release is tagged
 
 ## Solved
 
+- [X] Remove unused dependencies: pydub and audioop-lts (no longer used since
+  decoding moved to PyAV), resampy (imported but never called), ffmpeg-python
+  (never imported - ffmpeg is called as a program and installed by
+  startup.sh), and whisper 1.1.10, which is Graphite's time-series storage
+  library and not OpenAI's Whisper. numpy stays pinned, as torch,
+  transformers and faster-whisper depend on it
 - [X] Make speaker identification the fourth presentation of the
   transcription ("Med talarangivelser (beta)") instead of a separate
   checkbox and section. The dialogue now replaces the transcription section,

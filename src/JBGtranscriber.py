@@ -10,10 +10,7 @@ try:
     import tiktoken
     import time
     import psutil
-    from pydub import AudioSegment
     import io
-    import numpy as np
-    import resampy
     import os
     import re
     from docx import Document
@@ -350,6 +347,15 @@ FALLBACK_SUMMARY_PROMPT = (
 )
 
 _SPEAKER_LINE_RE = re.compile(r"^([^:\n]{2,40}?\s*\d*)\s*:\s+\S")
+
+# A reply in the speaker presentation: a label, a colon and the reply. The
+# label can be anything the instruction asked for ("Intervjuare 1",
+# "Ordförande", "Deltagare 2"), so it is recognised by its shape rather than
+# by name: it starts with a capital letter, is at most 40 characters and has
+# no sentence punctuation. Markdown bold around the label is tolerated.
+_SPEAKER_TURN_RE = re.compile(
+    r"^\*{0,2}([A-ZÅÄÖ][^:.!?\n*]{0,39}?)\*{0,2}\s*:\*{0,2}\s+(\S.*)$"
+)
 _SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?:…])\s+")
 _PARAGRAPH_BOUNDARY_RE = re.compile(r"\n\s*\n")
 
@@ -1954,7 +1960,7 @@ class JBGtranscriber():
                 try:
                     # The decrypted audio is decoded inside this process with
                     # PyAV, straight from memory, into 16 kHz mono float32.
-                    # pydub was used before, but it hands the bytes to ffmpeg
+                    # pydub was used before, but it handed the bytes to ffmpeg
                     # and ffprobe through their cache: protocol, which buffers
                     # the input in a temporary file, so the decrypted audio
                     # reached the disk. PyAV also identifies the format from
@@ -2193,23 +2199,14 @@ class JBGtranscriber():
             return
 
         blocks = re.split(r"\n\s*\n", content.strip())
+        known_labels = JBGtranscriber._known_speaker_labels(blocks) if speaker_labels else set()
         for block in blocks:
             if not block.strip():
                 continue
 
             if speaker_labels:
-                match = re.match(
-                    r"^((?:Intervjuare|Intervjuobjekt)\s+\d+)\s*:\s*(.*)$",
-                    block.strip(),
-                    flags=re.DOTALL,
-                )
-                if match:
-                    paragraph = document.add_paragraph()
-                    label = paragraph.add_run(match.group(1) + ": ")
-                    label.bold = True
-                    JBGtranscriber._add_inline_word_markup(paragraph, match.group(2).strip())
-                    paragraph.paragraph_format.space_after = Pt(4)
-                    continue
+                JBGtranscriber._add_speaker_block(document, block, known_labels)
+                continue
 
             paragraph = document.add_paragraph()
             lines = block.splitlines()
@@ -2220,6 +2217,69 @@ class JBGtranscriber():
                     paragraph.add_run(line.rstrip())
                 if line_index < len(lines) - 1:
                     paragraph.add_run().add_break()
+
+    @staticmethod
+    def _known_speaker_labels(blocks):
+        """The labels to treat as speakers, or an empty set to accept any label shape.
+
+        The list under "Identifierade talare:" names only speakers the model
+        described, so a label also counts if it starts a line at least twice
+        in the dialogue or ends with a number ("Deltagare 3"). A real speaker
+        usually speaks more than once; a stray "Det var så:" seldom recurs.
+        """
+        listed, counts = set(), {}
+        for block in blocks:
+            lines = block.strip().splitlines()
+            is_register = bool(lines) and lines[0].strip() == SPEAKER_REGISTER_SECTION_TITLE
+            for line in lines[1:] if is_register else lines:
+                match = _SPEAKER_TURN_RE.match(line.strip())
+                if not match:
+                    continue
+                label = match.group(1).strip().casefold()
+                if is_register:
+                    listed.add(label)
+                else:
+                    counts[label] = counts.get(label, 0) + 1
+        if not listed:
+            return set()
+        return listed | {
+            label for label, n in counts.items() if n >= 2 or re.search(r"\d\s*$", label)
+        }
+
+    @staticmethod
+    def _add_speaker_block(document, block, known_labels=frozenset()):
+        """Write dialogue line by line, each reply its own paragraph with its label in bold.
+
+        The speaker instruction asks for one reply per line without blank lines
+        in between, so a block normally holds the whole dialogue. A line without
+        a label continues the reply before it. The list of identified speakers
+        at the end has the same "label: text" form and is written the same way,
+        under its own title line.
+
+        When the list is there, only the labels in it count, so that a line
+        such as "Det var så: vi gick hem." inside a reply is not taken for a
+        new speaker. Without the list, any label-shaped start counts.
+        """
+        current = None
+        for line in block.splitlines():
+            text = line.strip()
+            if not text:
+                continue
+            match = _SPEAKER_TURN_RE.match(text)
+            if match and known_labels and match.group(1).strip().casefold() not in known_labels:
+                match = None
+            if match:
+                current = document.add_paragraph()
+                label = current.add_run(match.group(1).strip() + ": ")
+                label.bold = True
+                JBGtranscriber._add_inline_word_markup(current, match.group(2).strip())
+                current.paragraph_format.space_after = Pt(4)
+            elif current is not None:
+                current.add_run().add_break()
+                JBGtranscriber._add_inline_word_markup(current, text)
+            else:
+                current = None
+                JBGtranscriber._add_inline_word_markup(document.add_paragraph(), text)
 
     @staticmethod
     def _add_structured_word_content(document, content):

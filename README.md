@@ -48,7 +48,7 @@ markers are not left as visible text in the result. In particular:
 - Inline `**bold**`, `*italic*` and backtick markup becomes Word run formatting.
 - Markdown separator lines such as `---` become Word paragraph borders.
 - `[FEL?]...[/FEL?]` markers are removed and the suspected phrase is highlighted in Word.
-- Speaker labels such as `Intervjuare 1:` and `Intervjuobjekt 1:` are rendered in bold.
+- In the speaker presentation, each reply is its own paragraph with its label in bold, whatever the label is - `Intervjuare 1:`, `Intervjuobjekt 1:`, or `Ordförande:` and `Deltagare 2:` from an edited instruction. The labels in the list of identified speakers decide what counts as a label, so a colon inside a reply is not mistaken for a new speaker.
 
 When encryption is enabled, the complete DOCX package is first generated in a `BytesIO` memory stream and then encrypted with AES-256-GCM before it is written to disk. The server-side file therefore has a name such as:
 

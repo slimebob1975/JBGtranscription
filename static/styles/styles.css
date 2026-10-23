@@ -271,12 +271,6 @@ form button:disabled:hover {
     }
 }
 
-.summary-options > label[for="summaryPrompt"] {
-    display: block;
-    margin-bottom: 0.35rem;
-    color: #555;
-}
-
 /* === Flytande redigerare för promptinstruktionen ===
    The dialog is positioned absolutely rather than fixed: the page runs inside
    an iframe sized to its own content by iframe-resizer, so the iframe viewport
