@@ -7,6 +7,39 @@ The version number is kept only in `VERSION`, and each release is tagged
 
 ## Planned improvments
 
+- [ ] Split `src/JBGtranscriber.py` (about 2 800 lines, one class with 85
+  methods) into modules by responsibility. A natural division:
+  - prompt policy: loading the policy file, summary options, standard texts
+    and resolving instructions
+  - language model: `call_openai`, request parameters, retries on
+    unsupported parameters, and recording each call for the statistics
+  - segmentation: encoders, token counting, atoms and segments, and the
+    input and output token budgets
+  - speech to text: Whisper and faster-whisper, devices, memory checks,
+    model choice, in-memory decoding and the transcription cache
+  - analyses: summary with map and reduce, marking, follow-up questions,
+    the custom analysis and speaker identification
+  - document: the Word output, inline markup, speaker layout, tables,
+    "Om transkriberingen", statistics and cost
+  `JBGtranscriber` itself would keep only the step runner and the CLI, and
+  could combine the parts as mixins so that its public interface, and
+  therefore `main.py`, stays unchanged. The repository has no tests, so the
+  first step should be to add a test suite (the stubbed tests used during
+  development are a starting point) and then move one module at a time,
+  running the tests after each move.
+- [ ] Add a last presentation, e.g. "Ingen transkribering", for users who only
+  want the analyses and not the transcribed text in the document. With this
+  choice, a summary or the custom analysis must be selected; otherwise the
+  start button is disabled, with a short visible note saying why, rather
+  than silently not responding. The server must reject the same combination
+  for requests that do not come from the page. Points to settle:
+  - The audio is still transcribed, since the analyses need the text; only
+    the section is left out. The cache, the cost and the statistics work as
+    before.
+  - "Om transkriberingen" should state that the transcription was left out
+    by choice, so a reader of the document knows the analyses cannot be
+    checked against the text in the same file.
+  - Whether follow-up questions alone should also count as enough.
 - [ ] Consider removing speaker identification completely. The "Fråga–svar"
   summary type now covers most of what it was for, and it remains a beta
   whose labels can be wrong. Removing it means the "Med talarangivelser"
@@ -16,6 +49,8 @@ The version number is kept only in `VERSION`, and each release is tagged
   mapping of an old `speakers=true` request. Saved speaker instructions in
   users' browsers would simply no longer be used.
 - [ ] Investigate if batching and moving window can improve execution time for the transcription step without big loss of accuracy
+- [ ] Investigare if timestamp format for transcribed text can be changed from seconds to something like [hh:mm:ss] and perhaps colleted in larger chunks via some postprocessing stel
+- [ ] Investigare if marking of suspected errors and timestamps in the transcribed text can be combined
 
 ## Solved
 
