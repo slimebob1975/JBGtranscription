@@ -1,0 +1,18 @@
+# Python byte code
+__pycache__/
+*.pyc
+
+# Written at deploy time by scripts/write_build_info.py
+build_info.json
+
+# Local settings and environments; .env holds secrets
+.env
+venv/
+.venv/
+
+# Created by the application at runtime. cache/ holds transcriptions in
+# clear text, and uploads/ and results/ hold recordings and result documents.
+uploads/
+results/
+log/
+cache/
