@@ -16,3 +16,15 @@ uploads/
 results/
 log/
 cache/
+
+# Lokala nycklar, får aldrig committas
+src/keys/
+
+# Modell- och bibliotekscacher
+kb-whisper-cache/
+.cache/
+
+# Lokala skript med egna sökvägar
+start_local_service.ps1
+Propagate-GitChanges.ps1
+refactor.ps1
