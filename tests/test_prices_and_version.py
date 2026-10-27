@@ -16,7 +16,7 @@ class PriceTableTest(unittest.TestCase):
         self.table = read_price_table()
 
     def table_with(self, **changes):
-        data = json.load(open("policy/model_prices.json", encoding="utf-8"))
+        data = json.loads(Path("policy/model_prices.json").read_text(encoding="utf-8"))
         data.update(changes)
         path = Path(tempfile.mkdtemp()) / "prices.json"
         path.write_text(json.dumps(data), encoding="utf-8")
