@@ -7,6 +7,29 @@ The version number is kept only in `VERSION`, and each release is tagged
 
 ## Planned improvments
 
+- [ ] Readable timestamps in the "Med tidsstämplar" presentation. Today each
+  Whisper segment gets its own line, written as a Python tuple of seconds:
+  `(12.34, 18.9): Hej och välkommen ...`. Segments are only a few seconds
+  long, so a timestamp comes every 2-10 seconds, and an unknown end time
+  shows as `None`. Proposal:
+  - Write the time as `[hh:mm:ss]`, start time only, at the start of a
+    paragraph, e.g. `[00:12:34]`.
+  - Merge consecutive segments into paragraphs, starting a new one when at
+    least a given interval has passed (e.g. 30 or 60 seconds) and the
+    previous segment ends a sentence, so paragraphs do not break mid-sentence.
+  - Drop the fixed 80-character line breaks in this presentation and let
+    Word wrap the paragraphs.
+  - Set the timestamp apart visually, e.g. bold or grey.
+  Points to settle:
+  - The interval: a fixed value, a setting such as
+    `JBG_TIMESTAMP_INTERVAL_SECONDS`, or a choice in the GUI.
+  - The cache stores the timestamped text already formatted. Storing the raw
+    segments (start, end, text) instead and formatting when the document is
+    written would let a cached transcription use the new format; old cache
+    files expire within `JBG_CACHE_RETENTION_HOURS` anyway.
+  - Both engines return segments the same way, but the Transformers engine
+    can leave the end of the last segment unknown, which the new format
+    avoids by showing start times only.
 - [ ] Add a last presentation, e.g. "Ingen transkribering", for users who only
   want the analyses and not the transcribed text in the document. With this
   choice, a summary or the custom analysis must be selected; otherwise the
