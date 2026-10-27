@@ -77,7 +77,14 @@ After the HTTP response has finished streaming, the server-side result file is d
 ├── requirements_legacy.txt         # Unpinned dependency list
 ├── startup.sh                      # Startup script for Azure App Service
 ├── src/
-│   ├── JBGtranscriber.py           # Transcription, analysis and DOCX generation
+│   ├── JBGtranscriber.py           # The transcriber: constructor, step runner, command-line tool
+│   ├── JBGPromptPolicy.py          #   prompt policy, summary options, standard texts
+│   ├── JBGLanguageModel.py         #   calls to the language model and their statistics
+│   ├── JBGSegmentation.py          #   tokens, segments, input and output budgets
+│   ├── JBGSpeechToText.py          #   Whisper, devices, decoding, transcription cache
+│   ├── JBGAnalyses.py              #   summary, marking, follow-up questions, custom analysis
+│   ├── JBGSpeakers.py              #   speaker identification
+│   ├── JBGDocument.py              #   the Word document, statistics and cost
 │   ├── JBGSecureFileHandler.py     # AES-GCM handling for audio and DOCX results
 │   ├── JBGModelPrices.py           # Model menu, prices and cost calculation
 │   └── JBGLogger.py                # Logging
@@ -88,6 +95,7 @@ After the HTTP response has finished streaming, the server-side result file is d
 │   ├── index.html                  # Web frontend
 │   ├── styles/styles.css           # Frontend styling
 │   └── javascript/script.js        # Upload and status polling
+├── tests/                          # Test suite (unittest)
 ├── uploads/                        # Temporary uploaded audio files
 └── results/                        # Temporary encrypted/plain DOCX result files awaiting download
 ```
@@ -604,7 +612,7 @@ With the value `1`, the user may turn encryption off. In that mode the result is
 
 ### Audio formats and upload size
 
-The accepted formats are mp3, m4a, wav, aac, flac and ogg, defined in `SUPPORTED_AUDIO_EXTENSIONS` in `src/JBGtranscriber.py`. The page and the server both check the extension, and the decoder identifies the actual format from the content, so a file whose content is not audio fails with an error in the GUI. Video containers such as mp4 are not accepted, even though the decoder could extract their audio track.
+The accepted formats are mp3, m4a, wav, aac, flac and ogg, defined in `SUPPORTED_AUDIO_EXTENSIONS` in `src/JBGSpeechToText.py`. The page and the server both check the extension, and the decoder identifies the actual format from the content, so a file whose content is not audio fails with an error in the GUI. Video containers such as mp4 are not accepted, even though the decoder could extract their audio track.
 
 `JBG_MAX_UPLOAD_MB` sets the largest file that can be uploaded:
 
@@ -670,6 +678,20 @@ With encryption enabled, audio and DOCX result files are encrypted **at rest on 
 The OpenAI API key is kept in the browser's `localStorage` for convenience by the current frontend. It is sent with the transcription request but is not intentionally persisted by the server application.
 
 ---
+
+## 🧩 Code Structure and Tests
+
+`JBGtranscriber` is one class assembled from mixins, one module per responsibility, listed under *Project Structure*. `src/JBGtranscriber.py` combines them and keeps only the constructor, the step runner (`perform_transcription_steps`) and the command-line tool. It also re-exports every constant that used to be defined there, so `from src.JBGtranscriber import ...` works as before; new code should import from the module that owns the name.
+
+Methods call each other through `self`, so a method finds its helpers in whichever module they live. Static methods name the mixin that owns a helper. A module may only import from the modules above it in this order: prompt policy, language model, segmentation, speech to text, analyses, speakers, document. Speaker identification has a module of its own so that it can be removed as a unit.
+
+The tests run with Python's built-in `unittest`, from the repository root:
+
+```bash
+python -m unittest discover -s tests -t .
+```
+
+torch, transformers and tiktoken are replaced by stand-ins and OpenAI by a fake client, so the tests need no GPU, model download, network or API key. The decoding test is skipped where faster-whisper is not installed. Run them before and after every change to `src/`.
 
 ## 🧠 Optional AI Analysis
 

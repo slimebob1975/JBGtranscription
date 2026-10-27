@@ -7,26 +7,6 @@ The version number is kept only in `VERSION`, and each release is tagged
 
 ## Planned improvments
 
-- [ ] Split `src/JBGtranscriber.py` (about 2 800 lines, one class with 85
-  methods) into modules by responsibility. A natural division:
-  - prompt policy: loading the policy file, summary options, standard texts
-    and resolving instructions
-  - language model: `call_openai`, request parameters, retries on
-    unsupported parameters, and recording each call for the statistics
-  - segmentation: encoders, token counting, atoms and segments, and the
-    input and output token budgets
-  - speech to text: Whisper and faster-whisper, devices, memory checks,
-    model choice, in-memory decoding and the transcription cache
-  - analyses: summary with map and reduce, marking, follow-up questions,
-    the custom analysis and speaker identification
-  - document: the Word output, inline markup, speaker layout, tables,
-    "Om transkriberingen", statistics and cost
-  `JBGtranscriber` itself would keep only the step runner and the CLI, and
-  could combine the parts as mixins so that its public interface, and
-  therefore `main.py`, stays unchanged. The repository has no tests, so the
-  first step should be to add a test suite (the stubbed tests used during
-  development are a starting point) and then move one module at a time,
-  running the tests after each move.
 - [ ] Add a last presentation, e.g. "Ingen transkribering", for users who only
   want the analyses and not the transcribed text in the document. With this
   choice, a summary or the custom analysis must be selected; otherwise the
@@ -54,6 +34,15 @@ The version number is kept only in `VERSION`, and each release is tagged
 
 ## Solved
 
+- [X] Split `src/JBGtranscriber.py` (2 800 lines, one class with 85 methods)
+  into seven mixin modules: prompt policy, language model, segmentation,
+  speech to text, analyses, speakers and document. `JBGtranscriber.py` keeps
+  the constructor, the step runner and the command-line tool, and re-exports
+  the old module-level names, so `main.py` is unchanged. A test suite of 24
+  tests was added first and passes before and after. The split was made by a
+  script that copied code and comments verbatim; all 85 methods were
+  verified identical apart from `JBGtranscriber.` becoming `self.`, `cls.`
+  or the owning mixin, and every constant keeps its value
 - [X] Remove unused dependencies: pydub and audioop-lts (no longer used since
   decoding moved to PyAV), resampy (imported but never called), ffmpeg-python
   (never imported - ffmpeg is called as a program and installed by
