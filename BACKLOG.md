@@ -7,6 +7,39 @@ The version number is kept only in `VERSION`, and each release is tagged
 
 ## Planned improvments
 
+- [ ] Run the test suite every time the service is started locally. Add a
+  step to `start_local_service_template.ps1`, after the requirements are
+  installed and before uvicorn starts, running
+  `python -m unittest discover -s tests -t .` with the virtual environment's
+  Python; users then update their own `start_local_service.ps1` from the
+  template. Points to settle:
+  - Whether failing tests stop the start, or only print a clear warning and
+    start anyway.
+  - The same tests should also run in both GitHub workflows, in the step
+    already marked for tests, before the package is zipped, so that a
+    failing test stops a deployment instead of reaching a server. Running
+    them in `startup.sh` on Azure is not suggested: it would slow every
+    start and the deployment check covers it.
+- [ ] Support recordings in languages other than Swedish, for a limited set
+  of languages. Today everything assumes Swedish: the KB-Whisper models from
+  KBLab are trained for Swedish, the transcription is run with Swedish as
+  its language, and the analysis instructions and the document's headings
+  and texts are in Swedish. This has to go together with:
+  - Choosing a suitable speech model for each supported language, for
+    example a multilingual Whisper model or a model fine-tuned for that
+    language, and testing its accuracy on real recordings before the
+    language is offered. The accuracy levels would need a mapping per
+    language.
+  - A choice of the recording's language in the GUI, or automatic detection
+    (faster-whisper can detect the language), shown in "Om transkriberingen".
+  - A choice of output language, separate from the recording's language:
+    the analyses could be written in, for example, Swedish for a recording
+    in English, and the transcription itself could be translated. Whisper
+    only translates into English, so translation into other languages would
+    be done by the language model, at an extra cost shown in the statistics.
+  - What a translated transcription means for traceability: the document
+    should state that the text is a translation and keep the original
+    available, since a translation cannot be checked against the audio.
 - [ ] Readable timestamps in the "Med tidsstämplar" presentation. Today each
   Whisper segment gets its own line, written as a Python tuple of seconds:
   `(12.34, 18.9): Hej och välkommen ...`. Segments are only a few seconds
