@@ -1,17 +1,12 @@
 uvicorn[standard]
 fastapi
 openai
-whisper
 torch
-ffmpeg-python
 tiktoken
 python-multipart
 python-dotenv
 transformers
 numpy
-pydub
 cryptography
-resampy
-audioop-lts
 psutil
 python-docx

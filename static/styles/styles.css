@@ -32,6 +32,24 @@ h1 {
     margin-bottom: 0.5rem;
 }
 
+/* === Version under rubriken === */
+/* Pulled up towards the title; the side margins come from the shared
+   content column rule further down. */
+.version-display {
+    margin-top: -0.35rem;
+    margin-bottom: 0.5rem;
+    font-size: 0.75rem;
+    color: #777;
+}
+
+.version-display a {
+    color: inherit;
+}
+
+.version-display[hidden] {
+    display: none;
+}
+
 h3 {
     font-weight: normal;
     /* color: #444; */ /* Behålls */
@@ -45,6 +63,18 @@ input[type="file"] {
 }
 
 /* === Knappar === */
+/* One size for everything you choose or click with: labels, form controls
+   and buttons all use the base size of the page. Form controls do not
+   inherit the page font unless told to, and would otherwise be about 13 px.
+   Helper and status text (the version line, the prompt state, the footer)
+   is deliberately smaller and keeps its own size. */
+input,
+select,
+textarea,
+button {
+    font: inherit;
+}
+
 button {
     padding: 10px 20px;
     /* background-color: #2979be; */ /* Tidigare */
@@ -52,7 +82,6 @@ button {
     color: white;
     border: none;
     border-radius: 4px;
-    font-size: 14px;
     cursor: pointer;
     transition: background-color 0.2s ease, box-shadow 0.2s ease;
 }
@@ -109,6 +138,10 @@ form button:disabled:hover {
     /* background-color: #f9f9f9; */ /* Tidigare */
     background-color: #fafafa;
     max-width: var(--content-width);
+    /* A fieldset never shrinks below its content by default. Without this, a
+       wide control or a long label made one panel wider than the others on a
+       narrow phone, and the page scrolled sideways. */
+    min-width: 0;
 }
 
 /* === Gemensam innehållsspalt ===
@@ -151,8 +184,29 @@ form button:disabled:hover {
 }
 
 #fastEngineLabel {
-    font-size: 0.9rem;
     color: #333;
+    white-space: nowrap;
+}
+
+/* === Filväljare och kryptering på samma rad === */
+.upload-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.upload-row input[type="file"] {
+    margin-bottom: 0;
+    /* At the full font size the file selector is about 300 px wide, more
+       than a panel on a narrow phone. Let it shrink to the panel; the browser
+       then shortens the "no file chosen" text. */
+    min-width: 0;
+    max-width: 100%;
+}
+
+#encryptionLabel {
     white-space: nowrap;
 }
 
@@ -164,9 +218,7 @@ form button:disabled:hover {
 .transcription-format-choice label {
     display: block;
     margin-bottom: 0.1rem;
-    font-size: 0.9rem;
     color: #333;
-    white-space: nowrap;
 }
 
 /* === Redigerbar sammanfattningsinstruktion === */
@@ -187,7 +239,6 @@ form button:disabled:hover {
 .summary-style-choice label {
     display: block;
     margin-bottom: 0.25rem;
-    font-size: 0.85rem;
     color: #555;
 }
 
@@ -198,8 +249,6 @@ form button:disabled:hover {
     padding: 0.35rem;
     border: 1px solid #ccc;
     border-radius: 4px;
-    font-family: inherit;
-    font-size: 0.9rem;
     color: #333;
     background-color: #fff;
 }
@@ -222,13 +271,6 @@ form button:disabled:hover {
     }
 }
 
-.summary-options > label[for="summaryPrompt"] {
-    display: block;
-    margin-bottom: 0.35rem;
-    font-size: 0.85rem;
-    color: #555;
-}
-
 /* === Flytande redigerare för promptinstruktionen ===
    The dialog is positioned absolutely rather than fixed: the page runs inside
    an iframe sized to its own content by iframe-resizer, so the iframe viewport
@@ -246,7 +288,11 @@ form button:disabled:hover {
     transform: translateX(-50%);
     width: min(660px, calc(100% - 2rem));
     max-width: 660px;
-    /* A px cap, not vh: inside the iframe, vh is the full document height. */
+    /* A fixed px height, not vh: inside the iframe, vh is the full document
+       height. Fixed rather than a cap so that the text field, which takes the
+       space left over, gets smaller when the editor shows more rows (saved
+       instructions, the fixed opening) instead of pushing the buttons out. */
+    height: 520px;
     max-height: 520px;
     padding: 0;
     border: 1px solid #c3d0dc;
@@ -284,27 +330,65 @@ form button:disabled:hover {
     color: #666;
 }
 
-#summaryPrompt {
+#promptEditorText {
     display: block;
     flex: 1 1 auto;
     width: 100%;
     box-sizing: border-box;
-    min-height: 330px;
+    min-height: 6rem;
     margin: 0;
     padding: 0.75rem 1rem;
     border: none;
     border-radius: 0;
-    font-family: inherit;
-    font-size: 0.85rem;
     line-height: 1.5;
     color: #333;
     background-color: #fff;
     resize: none;
 }
 
-#summaryPrompt:focus {
+#promptEditorText:focus {
     outline: 2px solid #005293;
     outline-offset: -2px;
+}
+
+/* Saved instructions: a menu at the top of the editor */
+.prompt-editor-saved {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid #e6ecf2;
+}
+
+.prompt-editor-saved[hidden] {
+    display: none;
+}
+
+.prompt-editor-saved select {
+    flex: 1 1 14rem;
+    min-width: 0;
+    max-width: 100%;
+    padding: 0.3rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background-color: #fff;
+    color: #333;
+}
+
+/* The fixed opening of the custom analysis: visibly part of the instruction,
+   visibly not editable. */
+.prompt-editor-prefix {
+    margin: 0;
+    padding: 0.75rem 1rem 0.5rem 1rem;
+    line-height: 1.5;
+    color: #555;
+    background-color: #f3f6f9;
+    border-bottom: 1px dashed #d0dae4;
+}
+
+.prompt-editor-prefix[hidden] {
+    display: none;
 }
 
 .summary-editor-actions {
@@ -319,6 +403,12 @@ form button:disabled:hover {
 
 .summary-editor-spacer {
     flex: 1 1 auto;
+}
+
+.prompt-editor-decision {
+    display: flex;
+    gap: 0.6rem;
+    margin-left: auto;
 }
 
 .summary-editor-actions button {
@@ -358,7 +448,6 @@ form button:disabled:hover {
     background: none;
     border: none;
     color: #005293;
-    font-size: 0.8rem;
     text-decoration: underline;
     cursor: pointer;
 }

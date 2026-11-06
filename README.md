@@ -1,6 +1,6 @@
 # 📄 JBG Transkribering
 
-**JBG Transkribering** is a browser-based audio transcription service built with **FastAPI**. It transcribes `.mp3` files locally with KB-Whisper and can optionally use OpenAI models for summaries and other text analysis.
+**JBG Transkribering** is a browser-based audio transcription service built with **FastAPI**. It transcribes audio files (mp3, m4a, wav, aac, flac and ogg) locally with KB-Whisper and can optionally use OpenAI models for summaries and other text analysis.
 
 The completed transcription and selected analyses are assembled as a **Microsoft Word (`.docx`) document**. The result is no longer displayed in the GUI. When processing is complete, the browser automatically downloads the DOCX. With encryption enabled, the DOCX package is created in memory and only AES-GCM-encrypted bytes are written to the server-side `results/` folder.
 
@@ -8,12 +8,13 @@ The completed transcription and selected analyses are assembled as a **Microsoft
 
 ## 🚀 Features
 
-- 🎙️ Upload `.mp3` audio files for transcription
+- 🎙️ Upload audio files for transcription: mp3, m4a, wav, aac, flac or ogg
 - 🧠 Optional OpenAI-powered analysis:
   - Generate a **summary** from an editable instruction, chosen from a configurable set of summary types
   - Flag **suspected transcription errors**
-  - Suggest **follow-up questions**
-  - Attempt **speaker identification** (beta)
+  - Suggest **follow-up questions**, from an editable instruction
+  - Show the transcription **with speaker labels** (beta), from an editable instruction
+  - Run a **custom analysis** ("Anpassad") from your own instruction, for example of a meeting recording
 - 📝 Generate the complete result as a structured `.docx` document
 - 🧩 Separate Word headings for each available output section
 - 🧱 Convert AI Markdown-style structure to native Word headings, lists and text formatting
@@ -30,12 +31,11 @@ The completed transcription and selected analyses are assembled as a **Microsoft
 
 After transcription and all selected analysis steps have completed, the service creates a structured Word document containing:
 
-1. **Rå transkribering**
-2. **Transkribering med tidsstämplar**
-3. **Sammanfattning** (optional)
-4. **Transkription med markerade misstänkta fraser** (optional)
-5. **Uppföljningsfrågor** (optional)
-6. **Försök till identifiering av olika talare** (optional)
+1. **The transcription**, in the chosen presentation: raw text, with timestamps, with suspected errors marked, or with speaker labels (beta)
+2. **Sammanfattning** (optional)
+3. **Uppföljningsfrågor** (optional)
+4. **Anpassad analys** (optional)
+5. **Om transkriberingen** and **Statistik**
 
 Each top-level output section uses a real Word heading style. AI-generated
 Markdown-like formatting is converted when the DOCX is built, so formatting
@@ -48,7 +48,7 @@ markers are not left as visible text in the result. In particular:
 - Inline `**bold**`, `*italic*` and backtick markup becomes Word run formatting.
 - Markdown separator lines such as `---` become Word paragraph borders.
 - `[FEL?]...[/FEL?]` markers are removed and the suspected phrase is highlighted in Word.
-- Speaker labels such as `Intervjuare 1:` and `Intervjuobjekt 1:` are rendered in bold.
+- In the speaker presentation, each reply is its own paragraph with its label in bold, whatever the label is - `Intervjuare 1:`, `Intervjuobjekt 1:`, or `Ordförande:` and `Deltagare 2:` from an edited instruction. The labels in the list of identified speakers decide what counts as a label, so a colon inside a reply is not mistaken for a new speaker.
 
 When encryption is enabled, the complete DOCX package is first generated in a `BytesIO` memory stream and then encrypted with AES-256-GCM before it is written to disk. The server-side file therefore has a name such as:
 
@@ -77,15 +77,25 @@ After the HTTP response has finished streaming, the server-side result file is d
 ├── requirements_legacy.txt         # Unpinned dependency list
 ├── startup.sh                      # Startup script for Azure App Service
 ├── src/
-│   ├── JBGtranscriber.py           # Transcription, analysis and DOCX generation
+│   ├── JBGtranscriber.py           # The transcriber: constructor, step runner, command-line tool
+│   ├── JBGPromptPolicy.py          #   prompt policy, summary options, standard texts
+│   ├── JBGLanguageModel.py         #   calls to the language model and their statistics
+│   ├── JBGSegmentation.py          #   tokens, segments, input and output budgets
+│   ├── JBGSpeechToText.py          #   Whisper, devices, decoding, transcription cache
+│   ├── JBGAnalyses.py              #   summary, marking, follow-up questions, custom analysis
+│   ├── JBGSpeakers.py              #   speaker identification
+│   ├── JBGDocument.py              #   the Word document, statistics and cost
 │   ├── JBGSecureFileHandler.py     # AES-GCM handling for audio and DOCX results
+│   ├── JBGModelPrices.py           # Model menu, prices and cost calculation
 │   └── JBGLogger.py                # Logging
 ├── policy/
-│   └── prompt_policy.json          # OpenAI prompt configuration
+│   ├── prompt_policy.json          # OpenAI prompt configuration
+│   └── model_prices.json           # Models in the menu and their prices
 ├── static/
 │   ├── index.html                  # Web frontend
 │   ├── styles/styles.css           # Frontend styling
 │   └── javascript/script.js        # Upload and status polling
+├── tests/                          # Test suite (unittest)
 ├── uploads/                        # Temporary uploaded audio files
 └── results/                        # Temporary encrypted/plain DOCX result files awaiting download
 ```
@@ -153,7 +163,7 @@ Then open:
 
 ### How to use
 
-1. Select an `.mp3` file.
+1. Select an audio file (mp3, m4a, wav, aac, flac or ogg).
 2. Enter an OpenAI API key if you want to use the optional analysis functions.
 3. Select an OpenAI model.
 4. Select the desired analysis options.
@@ -170,9 +180,9 @@ The transcription text itself is never inserted into the GUI.
 The web interface can encrypt the uploaded audio and the generated DOCX result with the same browser-generated AES-256-GCM key:
 
 1. An **AES-256-GCM** key is generated locally in the browser.
-2. The `.mp3` content is encrypted in the browser before upload.
+2. The audio file is encrypted in the browser before upload.
 3. The encrypted audio and base64-encoded key are sent to the server over the application connection.
-4. The server decrypts the audio **in memory** for transcription.
+4. The server decrypts the audio **in memory** and decodes it there with PyAV, so the decrypted audio is never written to disk. It is deliberately not handed to ffmpeg, whose `cache:` input protocol would buffer it in a temporary file.
 5. After transcription and all requested analyses, `python-docx` builds the Word package in an in-memory `BytesIO` stream.
 6. The in-memory DOCX bytes are encrypted with AES-256-GCM before being written to the `results/` directory. No plaintext DOCX temporary file is created in encrypted mode.
 7. When processing is complete, the frontend automatically calls the download endpoint. The encryption key is sent in POST form data rather than in the URL.
@@ -184,13 +194,15 @@ The web interface can encrypt the uploaded audio and the generated DOCX result w
 
 In order: the transcribed text in the chosen form, then the analyses that were
 asked for, then two closing sections. **Om transkriberingen** names the Whisper
-model that actually ran, and **Statistik** is a table of what the run cost:
+model that actually ran, the estimated cost of the OpenAI calls and the program
+version, and **Statistik** is a table of what the run cost:
 
-| Moment | Modell | Anrop | Tokens in | Tokens ut | Tid |
-| --- | --- | --- | --- | --- | --- |
+| Moment | Modell | Anrop | Tokens in | Tokens ut | Tid | Kostnad (USD) |
+| --- | --- | --- | --- | --- | --- | --- |
 
-One row per moment, plus a total. Only counts and timings are recorded, never
-any part of the text. The section is left out when no model ran.
+One row per moment, plus a total. Only counts, timings and costs are recorded,
+never any part of the text. The section is left out when no model ran. How the
+cost is calculated is described under *Models and prices*.
 
 ### Logging
 
@@ -396,6 +408,14 @@ document falls back to the raw text with a line saying why.
 
 ### Speaker identification
 
+Speaker identification is one of the four presentations of the transcription,
+**Med talarangivelser (beta)**, rather than a separate analysis. The section
+then shows the whole text as a dialogue, with the identified speakers listed
+at the end, and like the marked presentation it cannot be combined with
+another one. If identification fails, the raw text is shown with a note. An
+old client that still posts `speakers=true` with the raw presentation is read
+as choosing this one.
+
 A long recording is labelled segment by segment, which raises a problem the
 model cannot solve on its own: each segment is processed in a separate call, so
 "Intervjuobjekt 1" in one segment need not be the same person as in the next.
@@ -409,6 +429,11 @@ previous segment are passed as context as well, marked as already handled, so
 a reply split across a boundary is attributed correctly without appearing
 twice.
 
+The format of the dialogue - one reply per line, label, colon - is not part
+of the editable instruction. The code adds it after whatever instruction is
+used, standard or edited, so that the layout of the section cannot be broken by
+editing the text.
+
 The dialogue itself contains nothing but replies: the instruction says so
 explicitly, since a description of each speaker repeated after every segment is
 not what the section is for. The speakers are instead listed once, under
@@ -420,8 +445,7 @@ otherwise be left sitting in the middle of the dialogue. If several blocks turn
 up in one answer, all of them are removed and the last is used.
 
 The raw register is never part of the result document. It is available afterwards
-as `speaker_register` on the transcriber, which is what a per-speaker analysis
-will be built on.
+as `speaker_register` on the transcriber.
 
 Segment size matters more here than for other rewriting work. The same
 recording processed in a single call reported 7, 6 and 6 speakers across three
@@ -479,6 +503,51 @@ Edit the `summary_options` list in `policy/prompt_policy.json`. Each entry needs
 | `prompt` | The instruction, as a list of lines. |
 
 The order of the list is the order of the dropdown.
+
+### Analyses on the marked text
+
+When **Med markering av misstänkta fel** is chosen, the summary, the follow-up questions and the custom analysis work from the marked text rather than the original. Each marking holds both the original wording and the suggested correction, as in `[FEL?]lufflarlagen (Kanske: LAS-lagen)[/FEL?]`, so the analysis can use whichever is more plausible instead of building on a transcription error.
+
+- Only then does the code add an instruction about the markers (`MARKED_TEXT_NOTE`), so analyses of unmarked text carry no rule about markers that are not there. It tells the model that the suggestions are unreviewed guesses, to use the reading that fits the context best, not to present an uncertain name or number as certain, and not to reproduce the markers.
+- Speaker identification is a presentation of its own, so it cannot be combined with marking.
+- If marking fails, the analyses fall back to the original text.
+- **Om transkriberingen** in the document states which analyses were based on the marked text.
+
+### Editable instructions for follow-up questions and speakers
+
+The instructions for **Föreslå följdfrågor** and for the **Med talarangivelser** presentation can be edited the same way as the summary instruction, which is what makes the service usable for more than interviews: the standard texts assume an interviewer and an interviewee, while a meeting needs other questions and other speaker labels. Ticking the follow-up box, or choosing the speaker presentation, reveals a **Redigera promptinstruktioner** link that opens the same editor.
+
+- The standard texts are served by `GET /analysis_prompts` from the `follow_up_questions` and `speaker_diarization` keys in `policy/prompt_policy.json`.
+- An edited text is remembered in the browser's `localStorage`; **Återgå till standardtexten** discards it. A text equal to the standard text counts as unedited.
+- Only an edited text is sent, as `questions_prompt` or `speakers_prompt`. An empty field means the standard text from the policy file, so a change there reaches every user who has not edited the text.
+- For speaker identification, the editable text only describes the recording and which labels to use. The form of the answer - one reply per line, starting with the speaker's label and a colon - is added by the code (`SPEAKER_FORMAT_SUFFIX`), together with the speaker register instruction, because the document is laid out by reading that format. An edited instruction therefore cannot break the layout.
+
+### Custom analysis (Anpassad)
+
+The last checkbox, **Anpassad**, runs an analysis the user describes. The instruction always starts with a fixed opening, `custom_analysis_preamble` in `policy/prompt_policy.json`:
+
+> Du analyserar och sammanställer transkriberad text från en ljudinspelning. Gör följande analys:
+
+The opening is shown above the text field but cannot be edited. The user writes only what follows it, and only that is sent, as `custom_prompt`; the server puts its own copy of the opening first. The result appears as **Anpassad analys** in the document, after the other analyses, and as its own row in the statistics and cost table. Long recordings are split and merged the same way as a summary.
+
+The checkbox works differently from the others:
+
+- Clicking it when unchecked opens the editor. **Klar** leaves it checked only if something has been written after the opening; **Avbryt**, Esc or an empty text leaves it unchecked.
+- Clicking it when checked unchecks it, without opening the editor. The text is kept.
+- The text is remembered in the browser's `localStorage` between visits, so clicking the box again opens the editor with the last text. The box itself always starts unchecked.
+
+The server rejects a request with the custom analysis checked but nothing written after the opening.
+
+All three instructions are capped at 20 000 characters, like the summary instruction, and only their length is written to the log, never their content. Since they are kept in the browser, on a shared computer the next user of the same browser can see them.
+
+### Saved instructions
+
+In the editor, any edited instruction can be saved under a name with **Spara som…** and picked again later from the **Sparade instruktioner** menu at the top of the editor; **Ta bort** deletes the one selected. This works for all four instructions - summary, follow-up questions, speakers and the custom analysis - and each has its own list, so a saved custom analysis such as "Beslutslista" does not appear among the speaker instructions.
+
+- Picking a saved instruction only fills in the field. **Klar** applies it as usual, and for **Anpassad** that is what checks the box.
+- Saving an existing name asks before replacing it. A text that is empty or equal to the standard text cannot be saved.
+- Up to 20 instructions per kind, with names of up to 60 characters.
+- The lists are kept in the browser's `localStorage` (`jbg_saved_prompts_summary`, `_questions`, `_speakers`, `_custom`), so they belong to one browser on one computer and are never sent to the server. Instructions the whole team should have belong in `policy/prompt_policy.json` instead.
 
 ### How long transcriptions are handled
 
@@ -541,6 +610,67 @@ With the value `0`, encryption is mandatory in the GUI and the backend rejects u
 
 With the value `1`, the user may turn encryption off. In that mode the result is temporarily stored as a normal DOCX until it has been streamed to the browser and deleted.
 
+### Audio formats and upload size
+
+The accepted formats are mp3, m4a, wav, aac, flac and ogg, defined in `SUPPORTED_AUDIO_EXTENSIONS` in `src/JBGSpeechToText.py`. The page and the server both check the extension, and the decoder identifies the actual format from the content, so a file whose content is not audio fails with an error in the GUI. Video containers such as mp4 are not accepted, even though the decoder could extract their audio track.
+
+`JBG_MAX_UPLOAD_MB` sets the largest file that can be uploaded:
+
+```env
+JBG_MAX_UPLOAD_MB=1024
+```
+
+The default is 1024 MB. The page refuses a larger file before uploading it, and the server rejects one with status 413. For scale, a one-hour interview is about 55 MB as mp3 at 128 kbit/s, but about 600 MB as stereo 16-bit wav at 44.1 kHz. With encryption on, the browser holds the file twice in memory while encrypting it, which is the main reason not to raise the limit much further.
+
+### Retention of files left on the server
+
+`JBG_RETENTION_HOURS` sets how long a file may stay in `uploads/` or `results/` before it is deleted, counted from when it was last written:
+
+```env
+JBG_RETENTION_HOURS=24
+```
+
+The default is 24 hours. The cleanup runs when the application starts and then once an hour. It only matters for files that normal processing did not remove: an upload whose job was cut short by a restart, or a result that was never downloaded.
+
+The value must be a whole number of hours. A value below 3 is raised to 3, since a job may run for up to two hours (`--timeout 7200` in `startup.sh`) and its upload must not be deleted while it is still being transcribed. If a result should remain downloadable longer, for example over a weekend, raise the value.
+
+Files are selected by age only. The folders are never emptied wholesale, because several instances can share the same disk, and one that restarts must not delete an upload that another is still working on.
+
+### Cached transcriptions
+
+With encryption off, every transcription is saved in `cache/`, so that uploading the same audio file again skips the transcription and goes straight to the analysis steps. The cache file is named after the content of the audio file, the accuracy level and the engine. A renamed copy of the same recording therefore still hits the cache, while a request for higher accuracy or the other engine is transcribed again rather than answered with an earlier, less accurate result. The audio file itself is never kept. On a cache hit, "Om transkriberingen" in the result document notes that the transcription was reused.
+
+`JBG_CACHE_RETENTION_HOURS` sets how long a cached transcription is kept, counted from when it was made:
+
+```env
+JBG_CACHE_RETENTION_HOURS=24
+```
+
+The default is 24 hours and the minimum is 1. The files are deleted by the same cleanup as above, at startup and then once an hour. They hold the transcription in clear text, so keep the value no longer than needed.
+
+With encryption on, the cache is neither read nor written.
+
+### Models and prices
+
+`policy/model_prices.json` lists the OpenAI models and their prices per million tokens, in three parts: `in` for input, `cachad` for input read from OpenAI's prompt cache, and `ut` for output. The cached part matters: most input in a long run is usually cached, and charging it at the full price would overstate the cost several times over. Reasoning tokens are part of the output and are charged as such.
+
+Three keys control the application:
+
+- `_i_menyn`: the models offered in the menu, in order. The page builds the menu from this list, and the server rejects any other model, so a model cannot be chosen without a price. The menu shows the model names only; the prices are used for the cost in the result document.
+- `_standardmodell`: the model selected by default.
+- `_kontrollerad`: the date (YYYY-MM-DD) the prices were last checked against OpenAI's price list.
+
+OpenAI has no API for prices, so they are entered by hand. The file is read when the application starts, and the log then warns about a model in the menu without a price, an incomplete price, and a check date that is missing or older than 90 days. After changing the file, restart the application.
+
+The cost of each call is calculated from the token counts OpenAI reports for it, and is shown per row in **Statistik** and as a total in **Om transkriberingen**, together with the check date. It is an estimate from list prices: it does not include charges that are not reported per call, and the invoice can differ. If any call used a model without a price, no total is given rather than a partial one.
+
+### Version
+
+The page shows the version under the title, e.g. "Version 1.1.0 · a1b2c3d (prod)", with the commit linking to GitHub. The same information appears as "Programversion" in the "Om transkriberingen" section of every result document, so a result can be traced to the code that produced it.
+
+- The version number is kept only in the file `VERSION`; other places, such as `BACKLOG.md`, refer to it. Update it by hand for each release and tag the commit with the same number, e.g. `v1.1.0`.
+- Commit, branch and environment come from `build_info.json`, written by `scripts/write_build_info.py` in the build step of both workflows, since the deployed package does not contain `.git`. Locally, the commit is read from git; without git the line shows only the version and "(lokal)".
+
 ### What "encrypted on the server" means
 
 With encryption enabled, audio and DOCX result files are encrypted **at rest on server disk**. The application must still hold plaintext transiently in RAM while it transcribes the audio, performs text analysis, constructs the DOCX and streams the downloaded document. This is the same basic security model as the previous encrypted TXT workflow.
@@ -549,6 +679,20 @@ The OpenAI API key is kept in the browser's `localStorage` for convenience by th
 
 ---
 
+## 🧩 Code Structure and Tests
+
+`JBGtranscriber` is one class assembled from mixins, one module per responsibility, listed under *Project Structure*. `src/JBGtranscriber.py` combines them and keeps only the constructor, the step runner (`perform_transcription_steps`) and the command-line tool. It also re-exports every constant that used to be defined there, so `from src.JBGtranscriber import ...` works as before; new code should import from the module that owns the name.
+
+Methods call each other through `self`, so a method finds its helpers in whichever module they live. Static methods name the mixin that owns a helper. A module may only import from the modules above it in this order: prompt policy, language model, segmentation, speech to text, analyses, speakers, document. Speaker identification has a module of its own so that it can be removed as a unit.
+
+The tests run with Python's built-in `unittest`, from the repository root:
+
+```bash
+python -m unittest discover -s tests -t .
+```
+
+torch, transformers and tiktoken are replaced by stand-ins and OpenAI by a fake client, so the tests need no GPU, model download, network or API key. The decoding test is skipped where faster-whisper is not installed. Run them before and after every change to `src/`.
+
 ## 🧠 Optional AI Analysis
 
 Each checkbox triggers a separate analysis step:
@@ -556,7 +700,7 @@ Each checkbox triggers a separate analysis step:
 - **Summary**: produces a short or extensive summary.
 - **Suspected transcription errors**: identifies phrases that may have been transcribed incorrectly.
 - **Follow-up questions**: generates questions based on the transcription.
-- **Speaker identification (beta)**: attempts to separate or identify speakers based on the transcribed content.
+- **Anpassad**: runs an analysis described by the user, after a fixed opening.
 
 Only selected/available analyses are included in the DOCX output.
 
@@ -574,11 +718,11 @@ Supported keys include:
 
 | Key | Used for |
 |---|---|
-| `short_summary` | Short summary instructions |
-| `extensive_summary` | Detailed summary instructions |
+| `summary_options` | The summary types and their instructions |
 | `suspicious_phrases` | Suspected transcription-error detection |
-| `follow_up_questions` | Follow-up question generation |
-| `speaker_diarization` | Speaker identification/segmentation |
+| `follow_up_questions` | Standard text for follow-up questions (editable in the GUI) |
+| `speaker_diarization` | Standard text for speaker identification (editable in the GUI); the answer format is added by the code |
+| `custom_analysis_preamble` | Fixed opening of the custom analysis (not editable in the GUI) |
 
 The prompt policy is loaded dynamically for each transcriber instance.
 
@@ -602,7 +746,7 @@ python src/JBGtranscriber.py [input_path] [output_folder] [cpu|gpu] [openai_api_
 python src/JBGtranscriber.py ./audio ./results cpu sk-xxxxxx gpt-5.2 extensive
 ```
 
-The command accepts either a single `.mp3` file or a directory containing `.mp3` files. Each input file produces a corresponding `.docx` file in the selected output directory.
+The command accepts either a single audio file or a directory, in which every file with a supported extension (mp3, m4a, wav, aac, flac, ogg) is processed. Each input file produces a corresponding `.docx` file in the selected output directory.
 
 ---
 
@@ -617,7 +761,7 @@ az webapp up --name jbg-transkribering --resource-group jbg-rg --sku B1 --runtim
 az webapp config set --name jbg-transkribering --resource-group jbg-rg --startup-file startup.sh
 ```
 
-The application uses its local `results/` directory as temporary result storage while a completed DOCX is waiting to be downloaded. In encrypted mode those files contain AES-GCM ciphertext rather than a readable Word package. Files are deleted after their download response has finished streaming, although stale files can remain after interrupted jobs or failed downloads and should be covered by an operational cleanup policy.
+The application uses its local `results/` directory as temporary result storage while a completed DOCX is waiting to be downloaded. In encrypted mode those files contain AES-GCM ciphertext rather than a readable Word package. Files are deleted after their download response has finished streaming. Files left behind by interrupted jobs or failed downloads are deleted once they are older than `JBG_RETENTION_HOURS` (24 hours by default).
 
 ---
 
@@ -631,7 +775,8 @@ The application uses its local `results/` directory as temporary result storage 
 - The AES key exists only in the current browser page session. Reloading or closing the page before the automatic download loses that key; an encrypted result left on the server would then require cleanup rather than recovery through the GUI.
 - The stored result file is deleted after the download response has finished streaming.
 - A server cannot reliably know that the browser ultimately saved a file to the user's filesystem; it can only know that the full HTTP response was delivered.
-- Interrupted processing or failed downloads can leave stale files in `uploads/` or `results/`; retain a separate cleanup policy for those cases.
+- With encryption off, transcriptions are kept in clear text in `cache/` for `JBG_CACHE_RETENTION_HOURS` (24 hours by default), so that the same file can be analysed again without a new transcription. With encryption on, nothing is cached.
+- Interrupted processing or failed downloads can leave files in `uploads/` or `results/`. The application deletes them once they are older than `JBG_RETENTION_HOURS` (24 hours by default), so such a file can stay on disk for up to that long plus one hour.
 - Set `ENCRYPTION_IS_OPTIONAL=0` when plaintext server-side result files must never be permitted by application configuration.
 - The OpenAI API key is not intentionally stored server-side.
 
@@ -639,9 +784,9 @@ The application uses its local `results/` directory as temporary result storage 
 
 ## 🧼 Cleanup
 
-Normal successful web runs delete the temporary uploaded audio and remove the result file after it has been streamed to the browser. Operational cleanup is still recommended for interrupted jobs and failed downloads.
+Normal successful web runs delete the temporary uploaded audio and remove the result file after it has been streamed to the browser. A failed job also deletes its upload. Files left behind by a restart mid-job or a result that was never downloaded are removed by the built-in cleanup once they are older than `JBG_RETENTION_HOURS`; see *Retention of files left on the server*.
 
-Example manual cleanup in PowerShell:
+To empty the folders by hand, for example on a development machine, stop the application first so that no active job is affected. In PowerShell:
 
 ```powershell
 Remove-Item .\uploads\* -Force
@@ -649,8 +794,6 @@ Remove-Item .\results\*.docx.encrypted -Force
 Remove-Item .\results\*.docx -Force
 Remove-Item .\results\*.tmp -Force
 ```
-
-For production use, prefer a retention rule that only removes stale files older than an appropriate threshold rather than deleting active jobs.
 
 ---
 

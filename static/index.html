@@ -12,7 +12,9 @@
     <div id="wrapper">
 
         <h1 label="app-title" id="app-title">JBG transkribering</h1>
-        <h3><em>För .mp3-filer</em></h3>
+        <!-- Fylls i av script.js från /config: version, commit och miljö -->
+        <p id="versionDisplay" class="version-display" hidden></p>
+        <h3><em>För ljudfiler: mp3, m4a, wav m.fl.</em></h3>
         <header style="margin-top: 1rem; font-size: 0.85rem; text-align: left; color: #555;">
             <p id="userDisplay" style="font-style: italic;"></p>
         </header>
@@ -20,11 +22,12 @@
         <!-- File selector -->
         <fieldset class="settings-panel" id="upload-options">
             <legend><h4>Ladda upp din ljudfil</h4></legend>
-            <input type="file" id="audioFile" accept=".mp3,audio/mpeg" title="Ladda upp .mp3-fil">
-            <label>
-                <input type="checkbox" id="enableEncryption" title="Ljudfilen och det färdiga dokumentet sparas krypterade på servern" checked>
-                Använd kryptering (rekommenderas)
+            <div class="upload-row">
+            <input type="file" id="audioFile" accept=".mp3,.m4a,.wav,.aac,.flac,.ogg" title="Ladda upp en ljudfil: mp3, m4a, wav, aac, flac eller ogg">
+            <label id="encryptionLabel" title="Ljudfilen och det färdiga dokumentet sparas krypterade på servern. Rekommenderas.">
+                <input type="checkbox" id="enableEncryption" checked> Kryptering
             </label>
+            </div>
         </fieldset>
 
         <!-- Transcription settings -->
@@ -39,7 +42,7 @@
                 <option value="bas">bas</option>
                 <option value="liten">liten</option>
             </select>
-            <label id="fastEngineLabel" title="Kör samma modell genom en snabbare motor. Ungefär dubbelt så snabbt; skillnaderna mot den långsammare motorn gäller skiljetecken och utfyllnadsord, inte innehåll"><input type="checkbox" id="fastEngine" checked> Snabb variant</label>
+            <label id="fastEngineLabel" title="Kör samma modell genom en snabbare motor. Ungefär dubbelt så snabbt. Skillnaderna mot den långsammare motorn gäller skiljetecken och utfyllnadsord, inte innehåll"><input type="checkbox" id="fastEngine" checked> Snabb variant</label>
             </div>
             <label>Ange hur du vill ha den transkriberade texten:</label>
             <div class="transcription-format-choice">
@@ -48,7 +51,15 @@
                 <label><input type="radio" name="transcriptionFormat" value="timestamps"
                        title="Hela texten med tidsstämplar i stället för löpande text"> Med tidsstämplar</label>
                 <label><input type="radio" name="transcriptionFormat" value="marked"
-                       title="Hela texten med misstänkta transkriberingsfel gulmarkerade och förslag på rättelse inom (Kanske: ...). Kräver API-nyckel"> Med markering av misstänkta fel</label>
+                       title="Hela texten med misstänkta transkriberingsfel gulmarkerade och förslag på rättelse inom (Kanske: ...). Sammanfattning, följdfrågor och anpassad analys bygger då på den markerade texten, som innehåller både den ursprungliga lydelsen och förslaget. Kräver API-nyckel"> Med markering av misstänkta fel</label>
+                <label><input type="radio" name="transcriptionFormat" value="speakers"
+                       title="Hela texten som en dialog, med en talarbeteckning före varje replik och de identifierade talarna listade sist. Beteckningarna bygger på ordval och sammanhang och kan bli fel. Du kan ändra instruktionen, till exempel för en mötesinspelning. Kräver API-nyckel"> Med talarangivelser (beta)</label>
+            </div>
+            <div id="speakersOptions" class="summary-options" hidden>
+                <div class="summary-prompt-footer">
+                    <button type="button" id="openSpeakersEditor" class="link-button">Redigera promptinstruktioner</button>
+                    <span id="speakersPromptState" class="summary-prompt-state" hidden></span>
+                </div>
             </div>
         </fieldset>
 
@@ -58,13 +69,8 @@
             <label for="apiKey" title="Ett lösenord du får av lokalsamordnaren, se lathunden">Skriv in din API-nyckel:</label><br>
             <input type="password" id="apiKey" placeholder="sk-..." style="width: 100%; max-width: 400px;">
             <label for="modelSelect" title="Nyare modeller ger bättre prestanda men kostar mer att använda">Välj språkmodell för analysen:</label><br>
-            <select id="modelSelect" style="width: 100%; max-width: 400px;">
-                <option value="gpt-5.6-terra" >gpt-5.6-terra</option>
-                <option value="gpt-5.6-luna" >gpt-5.6-luna</option>
-                <option value="gpt-5.4-mini" >gpt-5.4-mini</option>
-                <option value="gpt-5.2" selected>gpt-5.2</option>
-                <option value="gpt-5.1">gpt-5.1</option>
-            </select>
+            <!-- Fylls i av script.js från /config, som läser policy/model_prices.json -->
+            <select id="modelSelect" style="width: 100%; max-width: 400px;"></select>
             <label>Ange vilken textanalys du vill göra:</label><br>
             <label><input type="checkbox" id="optSummary" title="Skapar en sammanfattning av den transkriberade texten. Du väljer typ nedan och kan ändra instruktionen"> Generera sammanfattning</label>
             <div id="summaryOptions" class="summary-options" hidden>
@@ -77,8 +83,14 @@
                     <span id="summaryPromptState" class="summary-prompt-state" hidden></span>
                 </div>
             </div>
-            <label><input type="checkbox" id="optQuestions" title="Genererar förslag på uppföljningsfrågor baserat på den transkriberade texten"> Föreslå följdfrågor baserat på innehållet</label><br>
-            <label><input type="checkbox" id="optSpeakers" title="Återger hela texten med talarbeteckningar och listar de identifierade talarna sist. Beteckningarna bygger på ordval och sammanhang och kan bli fel"> Identifiera olika talare baserat på innehåll (beta)</label>
+            <label><input type="checkbox" id="optQuestions" title="Genererar förslag på uppföljningsfrågor baserat på den transkriberade texten. Du kan ändra instruktionen"> Föreslå följdfrågor baserat på innehållet</label><br>
+            <div id="questionsOptions" class="summary-options" hidden>
+                <div class="summary-prompt-footer">
+                    <button type="button" id="openQuestionsEditor" class="link-button">Redigera promptinstruktioner</button>
+                    <span id="questionsPromptState" class="summary-prompt-state" hidden></span>
+                </div>
+            </div>
+            <label><input type="checkbox" id="optCustom" title="En egen analys, till exempel av en mötesinspelning. Klicka för att skriva vad som ska göras. Rutan förblir ikryssad bara om du har skrivit något"> Anpassad</label>
         </fieldset>
         
         <!-- Display button for uploading file -->
@@ -97,20 +109,33 @@
 
     </div> <!-- Wrapper -->
 
-    <!-- Floating editor for the summary instruction. Kept out of normal flow so
-         that opening it does not change the height of the page. -->
-    <dialog id="summaryEditor" class="summary-editor" aria-labelledby="summaryEditorTitle">
+    <!-- Floating editor shared by the summary, follow-up questions, speakers
+         and the custom analysis. Kept out of normal flow so that opening it
+         does not change the height of the page. script.js fills in the title,
+         the subtitle and, for the custom analysis, the fixed opening. -->
+    <dialog id="promptEditor" class="summary-editor" aria-labelledby="promptEditorTitle">
         <div class="summary-editor-head">
-            <h2 id="summaryEditorTitle">Redigera promptinstruktioner</h2>
-            <p id="summaryEditorSubtitle" class="summary-editor-subtitle"></p>
+            <h2 id="promptEditorTitle">Redigera promptinstruktioner</h2>
+            <p id="promptEditorSubtitle" class="summary-editor-subtitle"></p>
         </div>
-        <textarea id="summaryPrompt" spellcheck="true"
-                  title="Den instruktion som styr sammanfattningen. Ändra texten om du vill ha något annat än standardtexten"></textarea>
+        <!-- Instructions the user has saved under a name, in this browser only -->
+        <div id="promptEditorSaved" class="prompt-editor-saved" hidden>
+            <select id="savedPromptSelect" title="Instruktioner du har sparat i den här webbläsaren"></select>
+            <button type="button" id="deleteSavedPrompt" class="link-button" hidden>Ta bort</button>
+        </div>
+        <!-- Fixed opening that cannot be edited; shown above the text field -->
+        <p id="promptEditorPrefix" class="prompt-editor-prefix" hidden></p>
+        <textarea id="promptEditorText" spellcheck="true"
+                  title="Instruktionen till språkmodellen. Ändra texten om du vill ha något annat än standardtexten"></textarea>
         <div class="summary-editor-actions">
-            <button type="button" id="resetSummaryPrompt" class="link-button" hidden>Återgå till standardtexten</button>
+            <button type="button" id="resetPromptEditor" class="link-button" hidden>Återgå till standardtexten</button>
+            <button type="button" id="savePromptAs" class="link-button" title="Spara texten under ett namn, så att du kan välja den igen senare">Spara som…</button>
             <span class="summary-editor-spacer"></span>
-            <button type="button" id="cancelSummaryEditor" class="secondary-button">Avbryt</button>
-            <button type="button" id="applySummaryEditor">Klar</button>
+            <!-- Kept together, so that on a narrow screen they wrap as a pair -->
+            <span class="prompt-editor-decision">
+                <button type="button" id="cancelPromptEditor" class="secondary-button">Avbryt</button>
+                <button type="button" id="applyPromptEditor">Klar</button>
+            </span>
         </div>
     </dialog>
     

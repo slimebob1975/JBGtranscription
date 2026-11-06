@@ -197,12 +197,8 @@
         "2. Märka upp varje replik med en neutral beteckning som:",
         "- Intervjuare 1, Intervjuare 2, osv.",
         "- Intervjuobjekt 1, Intervjuobjekt 2, osv.",
-        "3. Om en person tydligt återkommer längre fram (t.ex. fortsätter prata), använd samma beteckning som tidigare.",
-        "4. Gör en tydlig radbrytning mellan varje replik, så att dialogen blir läsbar.",
-        "Du får inte hitta på namn. Skriv inget utanför själva dialogen.",
-        "Exempel på format:",
-        "Intervjuare 1: Kan du beskriva hur processen ser ut från att ett ärende kommer in?",
-        "Intervjuobjekt 1: Ja, först får vi ett meddelande..."
+        "3. Om en person tydligt återkommer längre fram (t.ex. fortsätter prata), använd samma beteckning som tidigare."
     ],
-    "follow_up_questions": "Baserat på följande transkribering, generera fem möjliga uppföljningsfrågor som en intervjuare skulle kunna ställa:"
+    "follow_up_questions": "Baserat på följande transkribering, generera fem möjliga uppföljningsfrågor som en intervjuare skulle kunna ställa.",
+    "custom_analysis_preamble": "Du analyserar och sammanställer transkriberad text från en ljudinspelning. Gör följande analys:"
 }

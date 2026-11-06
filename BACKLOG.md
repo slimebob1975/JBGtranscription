@@ -1,67 +1,220 @@
 # Backlog - JBGTransciption
 
+The version number is kept only in `VERSION`, and each release is tagged
+`v<version>` on GitHub.
+
 ## Known issues
 
 ## Planned improvments
 
-- [ ] Consider summarising the marked-up text rather than the original when
-  "Med markering av misstänkta fel" is chosen, so the summary works from the
-  corrected reading instead of the suspected mistranscription. Marking
-  already runs before the summary, so the text is available. Two things to
-  settle first:
-
-  - The prompts are not hidden: what is in `policy/prompt_policy.json` is
-    what the model receives, apart from the map and reduce instructions the
-    code appends when a transcription has to be split. An instruction about
-    `[FEL?]` markers should therefore be appended by the code only when the
-    marked text is actually being summarised, so the other summary types do
-    not carry a rule about markers that are not there. Wording along the
-    lines of: the text may contain `[FEL?]...[/FEL?]` around a suspected
-    mistranscription followed by `(Kanske: ...)` with a suggested reading;
-    use whichever reading is most plausible and do not reproduce the
-    markers.
-  - The suggestions inside the markers are the model's own guesses, which
-    nobody has reviewed. Summarising them means a second model builds on a
-    first model's corrections. For a supervisory file that may argue for
-    keeping the original as the summary input, or for making it a choice
-    rather than automatic.
-- [ ] Offer the speaker-labelled text as a fourth presentation of the
-  transcription ("Med talarangivelser") rather than as a separate section,
-  once the per-speaker analysis is in place.
-- [ ] Add a factual per-speaker analysis on top of stable identities: which
-  topics each speaker returned to, what they stated, roughly how much they
-  spoke. It must stay descriptive, never evaluative - "Intervjuperson 1
-  återkom ofta till behovet av säkra rutiner för AI-utveckling", not
-  "Intervjuperson 1 verkar orolig för att rutinerna inte fungerar". The
-  transcript does not support inferences about a person's state of mind,
-  and the subjects are identifiable staff in a supervisory file.
-- [ ] Let the user edit the instructions for the other analyses too
-  (suspected errors, follow-up questions, speaker identification), reusing
-  the summary prompt editor.
-- [ ] Let the user save their own edited instruction as a named option,
-  alongside the ones defined in the policy file.
-- [ ] Show an estimated cost or segment count before upload, now that the
-  segment count is predictable from the transcription length.
+- [ ] **High priority.** Tell the user clearly when the language model fails,
+  and why. Today an invalid API key, a used-up quota, a model the key cannot
+  use and a network failure all give the same result: the job finishes as
+  if successful, the document has the raw text and sections that only say
+  "Sammanfattning var inte tillgänglig", "Förslag till uppföljande frågor
+  misslyckades" or "Den anpassade analysen misslyckades", and the cause
+  appears only in the server log. Further weaknesses:
+  - The key is first used after the transcription, which for a long
+    recording can take an hour.
+  - After an error that will not go away, every remaining analysis is still
+    tried and fails the same way. For a used-up quota or a network failure,
+    the OpenAI library also retries each call, so the user waits longer.
+  - When the whole job fails, the page only says "Ett fel uppstod vid
+    transkriberingen." and the cause goes to the browser console.
+  Proposal:
+  - Check the key at upload, before the transcription starts, by asking
+    OpenAI about the chosen model. The request is free and fast, and
+    reveals both an invalid key and a model the key cannot use. The key
+    must not be logged.
+  - Translate errors into plain Swedish by kind: key not accepted (401),
+    no access to the model (403/404), quota used up (429 with
+    insufficient_quota), too many requests (other 429), no connection or
+    timeout, and temporary problems at OpenAI (5xx).
+  - After a lasting error (key, quota, model access), skip the remaining
+    analyses and say so once, instead of failing at every step.
+  - Show the reason everywhere it matters: in each affected section of the
+    document, as a summary in "Om transkriberingen", and as a visible
+    message on the page, e.g. "Klart, men analyserna kunde inte göras:
+    OpenAI godkände inte API-nyckeln." A failed job should also show its
+    cause on the page, not only in the console.
+  - Add tests for each kind of error; the fake client in tests/support.py
+    can raise the OpenAI library's own exceptions.
+- [ ] Run the test suite every time the service is started locally. Add a
+  step to `start_local_service_template.ps1`, after the requirements are
+  installed and before uvicorn starts, running
+  `python -m unittest discover -s tests -t .` with the virtual environment's
+  Python; users then update their own `start_local_service.ps1` from the
+  template. Points to settle:
+  - Whether failing tests stop the start, or only print a clear warning and
+    start anyway.
+  - The same tests should also run in both GitHub workflows, in the step
+    already marked for tests, before the package is zipped, so that a
+    failing test stops a deployment instead of reaching a server. Running
+    them in `startup.sh` on Azure is not suggested: it would slow every
+    start and the deployment check covers it.
+- [ ] Support recordings in languages other than Swedish, for a limited set
+  of languages. Today everything assumes Swedish: the KB-Whisper models from
+  KBLab are trained for Swedish, the transcription is run with Swedish as
+  its language, and the analysis instructions and the document's headings
+  and texts are in Swedish. This has to go together with:
+  - Choosing a suitable speech model for each supported language, for
+    example a multilingual Whisper model or a model fine-tuned for that
+    language, and testing its accuracy on real recordings before the
+    language is offered. The accuracy levels would need a mapping per
+    language.
+  - A choice of the recording's language in the GUI, or automatic detection
+    (faster-whisper can detect the language), shown in "Om transkriberingen".
+  - A choice of output language, separate from the recording's language:
+    the analyses could be written in, for example, Swedish for a recording
+    in English, and the transcription itself could be translated. Whisper
+    only translates into English, so translation into other languages would
+    be done by the language model, at an extra cost shown in the statistics.
+  - What a translated transcription means for traceability: the document
+    should state that the text is a translation and keep the original
+    available, since a translation cannot be checked against the audio.
+- [ ] Readable timestamps in the "Med tidsstämplar" presentation. Today each
+  Whisper segment gets its own line, written as a Python tuple of seconds:
+  `(12.34, 18.9): Hej och välkommen ...`. Segments are only a few seconds
+  long, so a timestamp comes every 2-10 seconds, and an unknown end time
+  shows as `None`. Proposal:
+  - Write the time as `[hh:mm:ss]`, start time only, at the start of a
+    paragraph, e.g. `[00:12:34]`.
+  - Merge consecutive segments into paragraphs, starting a new one when at
+    least a given interval has passed (e.g. 30 or 60 seconds) and the
+    previous segment ends a sentence, so paragraphs do not break mid-sentence.
+  - Drop the fixed 80-character line breaks in this presentation and let
+    Word wrap the paragraphs.
+  - Set the timestamp apart visually, e.g. bold or grey.
+  Points to settle:
+  - The interval: a fixed value, a setting such as
+    `JBG_TIMESTAMP_INTERVAL_SECONDS`, or a choice in the GUI.
+  - The cache stores the timestamped text already formatted. Storing the raw
+    segments (start, end, text) instead and formatting when the document is
+    written would let a cached transcription use the new format; old cache
+    files expire within `JBG_CACHE_RETENTION_HOURS` anyway.
+  - Both engines return segments the same way, but the Transformers engine
+    can leave the end of the last segment unknown, which the new format
+    avoids by showing start times only.
+- [ ] Add a last presentation, e.g. "Ingen transkribering", for users who only
+  want the analyses and not the transcribed text in the document. With this
+  choice, a summary or the custom analysis must be selected; otherwise the
+  start button is disabled, with a short visible note saying why, rather
+  than silently not responding. The server must reject the same combination
+  for requests that do not come from the page. Points to settle:
+  - The audio is still transcribed, since the analyses need the text; only
+    the section is left out. The cache, the cost and the statistics work as
+    before.
+  - "Om transkriberingen" should state that the transcription was left out
+    by choice, so a reader of the document knows the analyses cannot be
+    checked against the text in the same file.
+  - Whether follow-up questions alone should also count as enough.
+- [ ] Consider removing speaker identification completely. The "Fråga–svar"
+  summary type now covers most of what it was for, and it remains a beta
+  whose labels can be wrong. Removing it means the "Med talarangivelser"
+  presentation and its editor target, `speaker_diarization` in the policy,
+  `SPEAKER_FORMAT_SUFFIX`, the register handling and its constants,
+  `JBG_DIARIZATION_SEGMENT_TOKENS`, the README section, and the server's
+  mapping of an old `speakers=true` request. Saved speaker instructions in
+  users' browsers would simply no longer be used.
 - [ ] Investigate if batching and moving window can improve execution time for the transcription step without big loss of accuracy
-- [ ] Investigare if a faster-Whisper model can improve execution time without big loss of accuracy
-- [ ] Accept other audio formats than mp3. .wav and .m4a turn up often in
-  practice. ffmpeg already handles them, so this is less work than it looks:
-  the restriction is that `AudioSegment.from_file` is called with
-  `format="mp3"`, that the file input accepts only `.mp3,audio/mpeg`, and that
-  the upload path hardcodes a `.mp3` suffix. Dropping the explicit format lets
-  pydub detect the container. Three things to settle at the same time:
-
-  - Validation. Accepting whatever ffmpeg can open also accepts video
-    containers. Either list the permitted formats explicitly, or decide that
-    pulling the audio out of an .mp4 is a feature rather than a mistake.
-  - File size. A 68 minute interview is about 95 MB as mp3 and roughly 700 MB
-    as 16-bit wav. That has to pass through the upload, the encryption step and
-    the instance's scratch space, on a plan with 7.71 GB of memory.
-  - The filename suffix used for the upload and for the result document, which
-    currently assumes mp3.
+- [ ] Investigare if timestamp format for transcribed text can be changed from seconds to something like [hh:mm:ss] and perhaps colleted in larger chunks via some postprocessing stel
+- [ ] Investigare if marking of suspected errors and timestamps in the transcribed text can be combined
 
 ## Solved
 
+- [X] Split `src/JBGtranscriber.py` (2 800 lines, one class with 85 methods)
+  into seven mixin modules: prompt policy, language model, segmentation,
+  speech to text, analyses, speakers and document. `JBGtranscriber.py` keeps
+  the constructor, the step runner and the command-line tool, and re-exports
+  the old module-level names, so `main.py` is unchanged. A test suite of 24
+  tests was added first and passes before and after. The split was made by a
+  script that copied code and comments verbatim; all 85 methods were
+  verified identical apart from `JBGtranscriber.` becoming `self.`, `cls.`
+  or the owning mixin, and every constant keeps its value
+- [X] Remove unused dependencies: pydub and audioop-lts (no longer used since
+  decoding moved to PyAV), resampy (imported but never called), ffmpeg-python
+  (never imported - ffmpeg is called as a program and installed by
+  startup.sh), and whisper 1.1.10, which is Graphite's time-series storage
+  library and not OpenAI's Whisper. numpy stays pinned, as torch,
+  transformers and faster-whisper depend on it
+- [X] Make speaker identification the fourth presentation of the
+  transcription ("Med talarangivelser (beta)") instead of a separate
+  checkbox and section. The dialogue now replaces the transcription section,
+  a failed identification falls back to the raw text with a note, and the
+  speaker instruction's Redigera link sits under the presentation choice. The
+  per-speaker analysis that was planned on top of it was dropped, as was the
+  estimate before upload; the faster-whisper investigation was settled by
+  the fast engine
+- [X] Base the summary, follow-up questions and custom analysis on the marked
+  text when "Med markering av misstänkta fel" is chosen. The marked text holds
+  both the original wording and the suggested correction, so the analysis can
+  weigh them rather than inherit a transcription error. The code adds an
+  instruction about the markers only when they are present, telling the model
+  that the suggestions are unreviewed and not to present an uncertain detail
+  as certain. Speaker identification keeps the original text, since markers
+  do not survive its rewrite reliably. The tooltip and "Om transkriberingen"
+  say which analyses were affected
+- [X] Let the user save their own edited instructions under a name, for all
+  four editable instructions, each with its own list. Kept in the browser
+  only, by choice: nothing is stored on the server, and options for the
+  whole team still belong in the policy file. The editor dialog now has a
+  fixed height, so the text field shrinks rather than pushing the buttons
+  out when more rows are shown
+- [X] Let the user edit the instructions for follow-up questions and speaker
+  identification, and add a custom analysis ("Anpassad") for recordings that
+  are not interviews, such as meetings. One editor dialog now serves the
+  summary, both analyses and the custom analysis. The custom analysis starts
+  with a fixed opening from `custom_analysis_preamble` that cannot be edited;
+  checking the box opens the editor, Klar leaves it checked only if something
+  was written, and the text is kept in the browser between visits. The speaker
+  answer format moved from the editable instruction into the code, so an
+  edited instruction cannot break the layout. Suspected errors stay
+  non-editable: their instruction defines the marker format the document
+  depends on
+- [X] Show the cost of the OpenAI calls in the result document. Prices per
+  model are kept in `policy/model_prices.json`, with input, cached input and
+  output priced separately, since most input in a long run is cached. The
+  cost is computed from the token counts OpenAI reports for each call, shown
+  per row in "Statistik" and as a total in "Om transkriberingen". The same
+  file now defines the model menu (`_i_menyn`, `_standardmodell`), the server
+  rejects models outside it, and the startup log warns about missing prices
+  and a check date (`_kontrollerad`) that is missing or older than 90 days
+- [X] Give cached transcriptions a lifetime. With encryption off,
+  transcriptions were cached in `cache/` but never deleted, so every
+  unencrypted transcription stayed on the server in clear text. They are now
+  deleted after `JBG_CACHE_RETENTION_HOURS` (24 by default, at least 1) by the
+  hourly cleanup. The cache key now includes the accuracy level and engine,
+  so a request for higher accuracy is no longer answered from an earlier,
+  less accurate run, and the cache file records the model used, so "Om
+  transkriberingen" is no longer left out on a cache hit and notes the reuse
+- [X] Accept other audio formats than mp3: mp3, m4a, wav, aac, flac and ogg,
+  listed in `SUPPORTED_AUDIO_EXTENSIONS`. Video containers are left out on
+  purpose. The page and the server check the extension, the upload keeps its
+  own suffix, and `JBG_MAX_UPLOAD_MB` (1024 by default) caps the size in both
+  places. In encrypted mode the decrypted audio is now decoded in memory with
+  PyAV (`faster_whisper.decode_audio`) instead of pydub. pydub passed it to
+  ffmpeg and ffprobe through their `cache:` protocol, which buffers the input
+  in a temporary file, so the decrypted audio reached the disk in every
+  encrypted run, mp3 included. `av` is pinned to 18.1.0, since faster-whisper
+  1.1.1 calls `av.open(metadata_errors=...)`, which PyAV 19 removed; unpinned,
+  a fresh install broke the fast engine for unencrypted files
+- [X] Show the version number and GitHub commit under the application title,
+  e.g. "Version 1.1.0 · a1b2c3d (prod)", with the commit linking to GitHub,
+  as in Klarspråkshjälpen. The version is in `VERSION`; commit, branch, run
+  number and build time are written to `build_info.json` by
+  `scripts/write_build_info.py` in the build step of both workflows, because
+  the deployed package does not contain `.git`, and locally the commit is
+  read from git. `/config` returns the information, and the "Om
+  transkriberingen" section of the result document gives it as
+  "Programversion"
+- [X] Stop uploads and results from staying on the server indefinitely. A
+  failure while setting up a job now deletes the upload and ends the job like
+  any other error, and files in `uploads/` and `results/` older than
+  `JBG_RETENTION_HOURS` (24 by default, at least 3) are deleted at startup
+  and once an hour. The rule is age alone rather than emptying `uploads/` at
+  startup, since the folders can be shared by several instances. Old entries
+  in the in-memory `jobs` dict are pruned by the same sweep, and an error
+  without a message is stored as its type name instead of reading as success
 - [X] Take speaker identification out of beta. Two runs of a seven-segment
   recording, with six register hand-offs each, produced the same five
   speakers and no verbatim repetition at any seam; the single-call runs it
