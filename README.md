@@ -656,7 +656,7 @@ With encryption on, the cache is neither read nor written.
 
 Three keys control the application:
 
-- `_i_menyn`: the models offered in the menu, in order. The page builds the menu from this list, and the server rejects any other model, so a model cannot be chosen without a price. Each option shows the input and output price per million tokens, e.g. "gpt-5.2 (indata: 1,75, utdata: 14)", with the currency in the label and the cached price in the option's tooltip.
+- `_i_menyn`: the models offered in the menu, in order. The page builds the menu from this list, and the server rejects any other model, so a model cannot be chosen without a price. The menu shows the model names only; the prices are used for the cost in the result document.
 - `_standardmodell`: the model selected by default.
 - `_kontrollerad`: the date (YYYY-MM-DD) the prices were last checked against OpenAI's price list.
 

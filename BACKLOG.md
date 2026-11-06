@@ -7,6 +7,38 @@ The version number is kept only in `VERSION`, and each release is tagged
 
 ## Planned improvments
 
+- [ ] **High priority.** Tell the user clearly when the language model fails,
+  and why. Today an invalid API key, a used-up quota, a model the key cannot
+  use and a network failure all give the same result: the job finishes as
+  if successful, the document has the raw text and sections that only say
+  "Sammanfattning var inte tillgänglig", "Förslag till uppföljande frågor
+  misslyckades" or "Den anpassade analysen misslyckades", and the cause
+  appears only in the server log. Further weaknesses:
+  - The key is first used after the transcription, which for a long
+    recording can take an hour.
+  - After an error that will not go away, every remaining analysis is still
+    tried and fails the same way. For a used-up quota or a network failure,
+    the OpenAI library also retries each call, so the user waits longer.
+  - When the whole job fails, the page only says "Ett fel uppstod vid
+    transkriberingen." and the cause goes to the browser console.
+  Proposal:
+  - Check the key at upload, before the transcription starts, by asking
+    OpenAI about the chosen model. The request is free and fast, and
+    reveals both an invalid key and a model the key cannot use. The key
+    must not be logged.
+  - Translate errors into plain Swedish by kind: key not accepted (401),
+    no access to the model (403/404), quota used up (429 with
+    insufficient_quota), too many requests (other 429), no connection or
+    timeout, and temporary problems at OpenAI (5xx).
+  - After a lasting error (key, quota, model access), skip the remaining
+    analyses and say so once, instead of failing at every step.
+  - Show the reason everywhere it matters: in each affected section of the
+    document, as a summary in "Om transkriberingen", and as a visible
+    message on the page, e.g. "Klart, men analyserna kunde inte göras:
+    OpenAI godkände inte API-nyckeln." A failed job should also show its
+    cause on the page, not only in the console.
+  - Add tests for each kind of error; the fake client in tests/support.py
+    can raise the OpenAI library's own exceptions.
 - [ ] Run the test suite every time the service is started locally. Add a
   step to `start_local_service_template.ps1`, after the requirements are
   installed and before uvicorn starts, running
