@@ -1,11 +1,11 @@
 from fastapi import FastAPI, File, UploadFile, BackgroundTasks, Form, Request, Response, HTTPException
-from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.background import BackgroundTask
 import os
 import asyncio
 import time
+import logging
 from contextlib import asynccontextmanager, suppress
 from dotenv import load_dotenv
 import sys
@@ -30,9 +30,8 @@ from src.JBGModelPrices import get_price_table, price_for, validate_price_table
 from pathlib import Path
 import torch
 from src.JBGLogger import JBGLogger
-from urllib.parse import unquote_plus
+from urllib.parse import unquote_plus, quote
 import base64
-from io import BytesIO
 
 logger = JBGLogger(level="DEBUG").logger
 
@@ -75,9 +74,8 @@ os.chmod(RESULTS_FOLDER, 0o777)
 # In-memory job status store: file_id -> dict
 jobs = {}
 
-# Files are normally deleted when a job ends or a download completes. Anything
-# left behind by a failed setup, a restart mid-job or a result nobody
-# downloaded is removed here once it is older than the retention time. The
+# Uploaded audio is removed when the job completes. Encrypted results are
+# retained for download retries and deleted by the age-based cleanup loop. The
 # rule is age alone, not "empty uploads/ at startup": the folders sit on disk
 # that several instances can share, and a restarting instance must not delete
 # an upload that another one is still transcribing.
@@ -392,6 +390,36 @@ if not FRAME_ANCESTORS or FRAME_ANCESTORS == "*":
     logger.warning("⚠️ Warning: Using default FRAME_ANCESTORS='*'. Set in .env (localhost) or Azure App Settings (deployed).")
 app.add_middleware(FrameOptionsMiddleware)
 
+class DownloadTimingMiddleware:
+    """Log when an actual HTTP response starts/completes for /download only."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not scope.get("path", "").startswith("/download/"):
+            await self.app(scope, receive, send)
+            return
+        clock = time.perf_counter()
+        # Do not log request bodies, form fields, keys or authentication headers.
+        logger.info("DOWNLOAD_ASGI request_received method=%s", scope.get("method"))
+
+        async def tracked_send(message):
+            if message["type"] == "http.response.start":
+                logger.info("DOWNLOAD_ASGI response_start status=%s elapsed_ms=%.1f", message["status"], (time.perf_counter()-clock)*1000)
+            elif message["type"] == "http.response.body" and not message.get("more_body", False):
+                logger.info("DOWNLOAD_ASGI response_body_final elapsed_ms=%.1f", (time.perf_counter()-clock)*1000)
+            await send(message)
+
+        try:
+            await self.app(scope, receive, tracked_send)
+        except Exception:
+            logger.exception("DOWNLOAD_ASGI exception elapsed_ms=%.1f", (time.perf_counter()-clock)*1000)
+            raise
+
+
+app.add_middleware(DownloadTimingMiddleware)
+
 
 @app.get("/config")
 def get_config():
@@ -693,36 +721,57 @@ async def get_transcription_status(file_id: str):
     }
 
 
-# Download the finished DOCX. If encrypted, decryption happens only in memory.
-# The server-side result file is removed after the response has been fully streamed.
+# Diagnostic download endpoint. Decryption stays in RAM; the on-disk file is
+# never replaced by plaintext and remains encrypted until age-based cleanup.
+# Keeping it permits safe retries when Azure responds with a gateway error.
 @app.post("/download/{file_id}")
 async def download_transcription(file_id: str, encryption_key: str = Form("")):
+    request_id = uuid.uuid4().hex[:12]
+    started = time.perf_counter()
+    logger.info("DOWNLOAD[%s] endpoint_enter file_id=%s", request_id, file_id)
     result_path = find_result_path(file_id)
     if result_path is None:
+        logger.warning("DOWNLOAD[%s] result_missing elapsed_ms=%.1f", request_id, (time.perf_counter()-started)*1000)
         return JSONResponse({"error": "Transcription not found"}, status_code=404)
 
     encrypted = result_path.name.lower().endswith(".encrypted")
+    if encrypted and not encryption_key:
+        logger.warning("DOWNLOAD[%s] missing_key", request_id)
+        return JSONResponse({"error": "Encryption key is required"}, status_code=400)
+
     try:
+        logger.info("DOWNLOAD[%s] decrypt_start encrypted=%s", request_id, encrypted)
         if encrypted:
-            if not encryption_key:
-                return JSONResponse(
-                    {"error": "Encryption key is required"},
-                    status_code=400,
-                )
-            secure_handler = SecureFileHandler(encryption_key)
-            stream = secure_handler.decrypt_file_to_memory(str(result_path))
+            # File I/O and AES-GCM decryption are synchronous. Move them to a
+            # thread so the single Uvicorn event loop can serve status checks.
+            def load_result():
+                return SecureFileHandler(encryption_key).decrypt_file_to_memory(str(result_path)).getvalue()
+            result_bytes = await asyncio.to_thread(load_result)
         else:
-            stream = BytesIO(result_path.read_bytes())
+            result_bytes = await asyncio.to_thread(result_path.read_bytes)
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        logger.info("DOWNLOAD[%s] decrypt_complete bytes=%d elapsed_ms=%.1f", request_id, len(result_bytes), elapsed_ms)
 
         filename = download_name_from_storage_path(result_path)
-        return StreamingResponse(
-            stream,
+        # ASCII fallback plus RFC 5987 filename for Swedish characters.
+        ascii_name = ''.join(ch if 32 <= ord(ch) < 127 and ch not in '\"' else '_' for ch in filename)
+        content_disposition = (f'attachment; filename="{ascii_name}"; ' + "filename*=UTF-8''" + quote(filename))
+        response = Response(
+            content=result_bytes,
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-            background=BackgroundTask(delete_result_file, result_path),
+            headers={
+                "Content-Disposition": content_disposition,
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+                "X-Download-Request-ID": request_id,
+            },
         )
-    except Exception as e:
-        logger.error(f"Could not stream DOCX result: {e}")
+        # Response sets Content-Length from the in-memory bytes.
+        logger.info("DOWNLOAD[%s] response_ready status=200 content_length=%d elapsed_ms=%.1f", request_id, len(result_bytes), (time.perf_counter()-started)*1000)
+        return response
+    except Exception:
+        # Do not log key, plaintext or filename. Preserve encrypted result for retry.
+        logger.exception("DOWNLOAD[%s] failed elapsed_ms=%.1f", request_id, (time.perf_counter()-started)*1000)
         return JSONResponse({"error": "Failed to serve DOCX result."}, status_code=500)
 
 
