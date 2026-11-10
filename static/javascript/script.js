@@ -1073,7 +1073,7 @@ async function checkStatus(file_id) {
                     document.getElementById("status").innerText =
                         "Resultatet är klart, men den automatiska nedladdningen misslyckades"
                         + describeDownloadFailure(e)
-                        + " Ladda om sidan och försök igen innan serverfilen städas bort.";
+                        + " Den krypterade resultatfilen behålls till den tidsstyrda städningen. Ladda inte om sidan – då kan krypteringsnyckeln i minnet gå förlorad.";
                 }
                 return;
             }
@@ -1089,5 +1089,5 @@ async function checkStatus(file_id) {
                 "Tekniskt fel vid statuskontroll. Försöker igen...";
             checkStatus(file_id);
         }
-    }, 3000);
+    }, 5000);
 }
