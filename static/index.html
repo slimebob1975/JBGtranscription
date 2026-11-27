@@ -97,11 +97,17 @@
         <button id="button" onclick="uploadFile()">Ladda upp</button>
         
         <!-- Display upload status -->
-        <p id="status"></p>
+        <p id="status" role="status"></p>
 
-        <!-- A spinner that spins while transcribing -->
-        <div id="spinner-container">
-            <div class="spinner"></div>
+        <!-- Bearbetningsöverlägg, utanför det normala sidflödet. -->
+        <div id="spinner-container" hidden>
+            <div class="processing-card">
+                <div class="spinner" aria-hidden="true"></div>
+                <p class="processing-title">Transkribering pågår</p>
+                <p id="processingDetail" role="status"></p>
+                <p id="processingAccuracy"></p>
+                <p class="processing-time">Förfluten tid: <span id="processingElapsed">00:00</span></p>
+            </div>
         </div>
         
         <p class="result-info">
