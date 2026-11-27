@@ -782,8 +782,53 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 });
 
+// The timer covers preparation, upload, transcription, analysis and download.
+// Keep live status outside the busy fieldsets so assistive technology can read it.
+let processingTimer = null;
+let processingActive = false;
+
+function updateProcessingStatus(message) {
+    const detail = document.getElementById("processingDetail");
+    if (detail.textContent !== message) detail.textContent = message;
+}
+
+function startProcessing() {
+    processingActive = true;
+    const started = performance.now();
+    const accuracy = document.getElementById("accuracySelect");
+    const label = accuracy.selectedOptions[0]?.textContent || accuracy.value;
+    document.getElementById("processingAccuracy").textContent =
+        `Vald noggrannhet: ${label}`;
+    document.getElementById("status").textContent = "";
+    document.getElementById("spinner-container").hidden = false;
+    document.querySelectorAll("#wrapper fieldset").forEach(panel => {
+        panel.inert = true;
+        panel.setAttribute("aria-busy", "true");
+    });
+    updateProcessingStatus("Förbereder ljudfilen…");
+    function tick() {
+        const seconds = Math.floor((performance.now() - started) / 1000);
+        document.getElementById("processingElapsed").textContent =
+            `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+    }
+    tick();
+    processingTimer = setInterval(tick, 1000);
+}
+
+function stopProcessing() {
+    if (processingTimer !== null) clearInterval(processingTimer);
+    processingTimer = null;
+    processingActive = false;
+    document.getElementById("spinner-container").hidden = true;
+    document.querySelectorAll("#wrapper fieldset").forEach(panel => {
+        panel.inert = false;
+        panel.removeAttribute("aria-busy");
+    });
+}
+
 // ✅ Upload handler
 async function uploadFile() {
+    if (processingActive || document.getElementById("button").disabled) return;
 
     // Take care of data
     const fileInput = document.getElementById("audioFile");
@@ -808,10 +853,9 @@ async function uploadFile() {
         return;
     }
 
-    // Update status
-    document.getElementById("status").innerText = "Filen laddas upp...-v.g. vänta!";
-
-     // Disable inputs
+    // Preserve the existing one-job-per-page behaviour and encryption key.
+    startProcessing();
+    fileInput.disabled = true;
     document.getElementById("enableEncryption").disabled = true;
     document.getElementById("apiKey").disabled = true;
     document.getElementById("modelSelect").disabled = true;
@@ -827,111 +871,123 @@ async function uploadFile() {
     document.getElementById("optCustom").disabled = true;
     document.getElementById("button").disabled = true;
 
-    // Prepare data to send for backend
-    let formData = new FormData();
+    try {
+        // Prepare data to send for backend
+        let formData = new FormData();
 
-    // Should we use encryption or not?
-    const encryptEnabled = document.getElementById("enableEncryption").checked;
-    if (encryptEnabled) {
-        // 🔑 Generera AES-nyckel
-        const key = await window.crypto.subtle.generateKey(
-            { name: "AES-GCM", length: 256 },
-            true,
-            ["encrypt", "decrypt"]
-        );
+        // Should we use encryption or not?
+        const encryptEnabled = document.getElementById("enableEncryption").checked;
+        if (encryptEnabled) {
+            updateProcessingStatus("Krypterar ljudfilen…");
+            // 🔑 Generera AES-nyckel
+            const key = await window.crypto.subtle.generateKey(
+                { name: "AES-GCM", length: 256 },
+                true,
+                ["encrypt", "decrypt"]
+            );
 
-        // 🔄 Konvertera nyckel till base64 för att skicka till backend
-        const rawKey = await crypto.subtle.exportKey("raw", key);
-        const keyBase64 = btoa(String.fromCharCode(...new Uint8Array(rawKey)));
+            // 🔄 Konvertera nyckel till base64 för att skicka till backend
+            const rawKey = await crypto.subtle.exportKey("raw", key);
+            const keyBase64 = btoa(String.fromCharCode(...new Uint8Array(rawKey)));
 
-        // 🔐 Kryptera filinnehåll
-        const iv = window.crypto.getRandomValues(new Uint8Array(12));
-        const arrayBuffer = await file.arrayBuffer();
-        const encrypted = await crypto.subtle.encrypt(
-            { name: "AES-GCM", iv: iv },
-            key,
-            arrayBuffer
-        );
+            // 🔐 Kryptera filinnehåll
+            const iv = window.crypto.getRandomValues(new Uint8Array(12));
+            const arrayBuffer = await file.arrayBuffer();
+            const encrypted = await crypto.subtle.encrypt(
+                { name: "AES-GCM", iv: iv },
+                key,
+                arrayBuffer
+            );
 
-        // Skapa ny Blob för krypterad fil
-        const encryptedBlob = new Blob([iv, encrypted], { type: "application/octet-stream" });
+            // Skapa ny Blob för krypterad fil
+            const encryptedBlob = new Blob([iv, encrypted], { type: "application/octet-stream" });
 
-        formData.append("file", encryptedBlob, file.name + ".enc");
-        formData.append("encryption_key", keyBase64);
-        globalEncryptionKeyBase64 = keyBase64;
+            formData.append("file", encryptedBlob, file.name + ".enc");
+            formData.append("encryption_key", keyBase64);
+            globalEncryptionKeyBase64 = keyBase64;
 
-    } else {
-        formData.append("file", file);
-        formData.append("encryption_key", "");
-        globalEncryptionKeyBase64 = "";
-    }
-
-    formData.append("api_key", document.getElementById("apiKey").value.trim());
-    formData.append("model", document.getElementById("modelSelect").value);
-    const summarizeChecked = document.getElementById("optSummary").checked;
-    formData.append("summarize", summarizeChecked);
-    formData.append("summary_style", currentSummaryStyle());
-    // Empty means "use the server-side default for the chosen style".
-    formData.append(
-        "summary_prompt",
-        summarizeChecked ? summaryPromptText.trim() : ""
-    );
-    formData.append("transcription_accuracy", document.getElementById("accuracySelect").value);
-    formData.append("fast_engine", document.getElementById("fastEngine").checked);
-    formData.append(
-        "transcription_format",
-        document.querySelector('input[name="transcriptionFormat"]:checked')?.value || "raw"
-    );
-    const questionsChecked = document.getElementById("optQuestions").checked;
-    // Speaker identification is a presentation of the text, chosen above.
-    const speakersChecked =
-        document.querySelector('input[name="transcriptionFormat"]:checked')?.value === "speakers";
-    const customChecked = document.getElementById("optCustom").checked;
-    formData.append("questions", questionsChecked);
-    // Empty means the standard text; only an edited text is sent.
-    formData.append("questions_prompt", questionsChecked ? questionsPromptText : "");
-    formData.append("speakers_prompt", speakersChecked ? speakersPromptText : "");
-    // Only what follows the fixed opening; the server adds the opening.
-    formData.append("custom_analysis", customChecked);
-    formData.append("custom_prompt", customChecked ? customPromptText : "");
-
-    fileInput.disabled = true;
-
-    // Check Formdata for errors.
-    //
-    // Fälten loggas för felsökning, men innehållet får inte skrivas ut rakt av:
-    // formuläret innehåller API-nyckeln och krypteringsnyckeln, och
-    // webbläsarkonsolen sparas, klistras in i felrapporter och syns för den som
-    // sitter bredvid. Hemligheter visas därför bara med längd, och
-    // promptinstruktionen bara med teckenantal.
-    const SECRET_FIELDS = ["api_key", "encryption_key"];
-    const BULKY_FIELDS = ["summary_prompt"];
-    for (const [key, value] of formData.entries()) {
-        if (value instanceof Blob) {
-            console.log(`${key}: [Blob] filename=${value.name}, type=${value.type}, size=${value.size}`);
-        } else if (SECRET_FIELDS.includes(key)) {
-            console.log(`${key}: [dolt, ${String(value).length} tecken]`);
-        } else if (BULKY_FIELDS.includes(key)) {
-            console.log(`${key}: [${String(value).length} tecken]`);
         } else {
-            console.log(`${key}: ${value}`);
+            formData.append("file", file);
+            formData.append("encryption_key", "");
+            globalEncryptionKeyBase64 = "";
         }
-    }
 
-    // Store API key locally
-    localStorage.setItem("openai_api_key", document.getElementById("apiKey").value.trim());
+        formData.append("api_key", document.getElementById("apiKey").value.trim());
+        formData.append("model", document.getElementById("modelSelect").value);
+        const summarizeChecked = document.getElementById("optSummary").checked;
+        formData.append("summarize", summarizeChecked);
+        formData.append("summary_style", currentSummaryStyle());
+        // Empty means "use the server-side default for the chosen style".
+        formData.append(
+            "summary_prompt",
+            summarizeChecked ? summaryPromptText.trim() : ""
+        );
+        formData.append("transcription_accuracy", document.getElementById("accuracySelect").value);
+        formData.append("fast_engine", document.getElementById("fastEngine").checked);
+        formData.append(
+            "transcription_format",
+            document.querySelector('input[name="transcriptionFormat"]:checked')?.value || "raw"
+        );
+        const questionsChecked = document.getElementById("optQuestions").checked;
+        // Speaker identification is a presentation of the text, chosen above.
+        const speakersChecked =
+            document.querySelector('input[name="transcriptionFormat"]:checked')?.value === "speakers";
+        const customChecked = document.getElementById("optCustom").checked;
+        formData.append("questions", questionsChecked);
+        // Empty means the standard text; only an edited text is sent.
+        formData.append("questions_prompt", questionsChecked ? questionsPromptText : "");
+        formData.append("speakers_prompt", speakersChecked ? speakersPromptText : "");
+        // Only what follows the fixed opening; the server adds the opening.
+        formData.append("custom_analysis", customChecked);
+        formData.append("custom_prompt", customChecked ? customPromptText : "");
 
-    let response = await fetch("/upload/", {
-        method: "POST",
-        body: formData
-    });
 
-    let result = await response.json();
-    console.log(result);
+        // Check Formdata for errors.
+        //
+        // Fälten loggas för felsökning, men innehållet får inte skrivas ut rakt av:
+        // formuläret innehåller API-nyckeln och krypteringsnyckeln, och
+        // webbläsarkonsolen sparas, klistras in i felrapporter och syns för den som
+        // sitter bredvid. Hemligheter visas därför bara med längd, och
+        // promptinstruktionen bara med teckenantal.
+        const SECRET_FIELDS = ["api_key", "encryption_key"];
+        const BULKY_FIELDS = ["summary_prompt"];
+        for (const [key, value] of formData.entries()) {
+            if (value instanceof Blob) {
+                console.log(`${key}: [Blob] filename=${value.name}, type=${value.type}, size=${value.size}`);
+            } else if (SECRET_FIELDS.includes(key)) {
+                console.log(`${key}: [dolt, ${String(value).length} tecken]`);
+            } else if (BULKY_FIELDS.includes(key)) {
+                console.log(`${key}: [${String(value).length} tecken]`);
+            } else {
+                console.log(`${key}: ${value}`);
+            }
+        }
 
-    if (result.file_id) {
-        document.getElementById("status").innerText = "Fil uppladdad. Processar...";
-        checkStatus(result.file_id);
+        // Store API key locally
+        localStorage.setItem("openai_api_key", document.getElementById("apiKey").value.trim());
+
+        updateProcessingStatus("Laddar upp ljudfilen…");
+        let response = await fetch("/upload/", {
+            method: "POST",
+            body: formData
+        });
+
+        if (!response.ok) {
+            document.getElementById("status").textContent =
+                `Uppladdningen misslyckades (statuskod ${response.status}).`;
+            return;
+        }
+        const result = await response.json();
+        if (!result || typeof result.file_id !== "string" || !result.file_id) {
+            throw new Error("Invalid upload response");
+        }
+        updateProcessingStatus("Fil uppladdad. Väntar på transkribering…");
+        await checkStatus(result.file_id);
+    } catch (err) {
+        document.getElementById("status").textContent =
+            "Kunde inte förbereda eller skicka ljudfilen, eller läsa uppladdningssvaret. Bearbetningen kan fortfarande pågå på servern.";
+    } finally {
+        stopProcessing();
     }
 }
 
@@ -986,108 +1042,53 @@ async function downloadResult(file_id, filename) {
     setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
 }
 
-// ✅ Polling for transcription status – with live step updates
+// Await each status request and the download; never overlap requests.
 async function checkStatus(file_id) {
-    const spinner = document.getElementById("spinner-container");
-    spinner.style.display = "block";
-
-    setTimeout(async () => {
+    let consecutiveFailures = 0;
+    while (true) {
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        let result;
         try {
             const response = await fetch(`/transcription/${file_id}`);
-            console.info("HTTP status:", response.status);
-
-            // 1) Jobbet pågår → 202 Accepted
-            if (response.status === 202) {
-                let result;
-                try {
-                    result = await response.json();
-                } catch (e) {
-                    console.error("Kunde inte tolka 202-svar från servern:", e);
-                    document.getElementById("status").innerText =
-                        "Tekniskt fel vid statuskontroll. Försöker igen...";
-                    checkStatus(file_id);
-                    return;
-                }
-
-                document.getElementById("status").innerText =
-                    result.status || "Processar...";
-                // Fortsätt polla
-                checkStatus(file_id);
-                return;
-            }
-
-            // 2) Andra felaktiga HTTP-statusar (4xx, 5xx)
             if (!response.ok) {
-                const text = await response.text().catch(() => "");
-                console.error(
-                    "Serverfel vid /transcription:",
-                    response.status,
-                    text
-                );
-                spinner.style.display = "none";
-                document.getElementById("status").innerText =
+                document.getElementById("status").textContent =
                     `Serverfel (${response.status}). Ett fel uppstod vid transkriberingen.`;
                 return;
             }
-
-            // 3) 200 OK → jobbet är färdigt och DOCX-filen är sparad på servern
-            let result;
-            try {
-                result = await response.json();
-            } catch (e) {
-                console.error("Kunde inte tolka 200-svar från servern:", e);
-                document.getElementById("status").innerText =
-                    "Tekniskt fel vid statuskontroll. Försöker igen...";
-                checkStatus(file_id);
-                return;
+            result = await response.json();
+            if (!result || typeof result.done !== "boolean") {
+                throw new Error("Invalid status response");
             }
-
-            // Extra säkerhet: om backend i framtiden skickar error/done här
-            if (result.error) {
-                spinner.style.display = "none";
-                document.getElementById("status").innerText =
-                    result.status || "Ett fel uppstod vid transkriberingen.";
-                console.error("Transcription error from server:", result.error);
-                return;
-            }
-
-            if (result.done === false) {
-                document.getElementById("status").innerText =
-                    result.status || "Processar...";
-                checkStatus(file_id);
-                return;
-            }
-
-            // Klar och lyckad: hämta DOCX automatiskt.
-            if (result.done === true) {
-                spinner.style.display = "none";
-                document.getElementById("status").innerText =
-                    result.status || "Transkribering avslutad. Startar nedladdning...";
-
-                try {
-                    await downloadResult(file_id, result.download_filename);
-                    document.getElementById("status").innerText =
-                        "Transkribering och analys avslutad. DOCX-fil laddas ner automatiskt.";
-                } catch (e) {
-                    console.error("Fel vid automatisk nedladdning:", e);
-                    document.getElementById("status").innerText =
-                        "Resultatet är klart, men den automatiska nedladdningen misslyckades"
-                        + describeDownloadFailure(e)
-                        + " Den krypterade resultatfilen behålls till den tidsstyrda städningen. Ladda inte om sidan – då kan krypteringsnyckeln i minnet gå förlorad.";
-                }
-                return;
-            }
-
-            // Om vi hamnar här är något oväntat
-            console.warn("Oväntat svar från /transcription:", result);
-            document.getElementById("status").innerText =
-                "Oväntat svar från servern. Försöker igen...";
-            checkStatus(file_id);
+            consecutiveFailures = 0;
         } catch (err) {
-            console.error("Fel vid statuskontroll:", err);
-            document.getElementById("status").innerText =
-                "Tekniskt fel vid statuskontroll. Försöker igen...";
-            checkStatus(file_id);
+            if (++consecutiveFailures >= 3) {
+                document.getElementById("status").textContent =
+                    "Kunde inte hämta status. Bearbetningen kan fortfarande pågå på servern. Ladda inte om sidan – då kan krypteringsnyckeln i minnet gå förlorad.";
+                return;
+            }
+            updateProcessingStatus("Tekniskt fel vid statuskontroll. Försöker igen…");
+            continue;
         }
-    }, 5000);
+        if (result.error) {
+            document.getElementById("status").textContent =
+                result.status || "Ett fel uppstod vid transkriberingen.";
+            return;
+        }
+        if (!result.done) {
+            updateProcessingStatus(result.status || "Transkribering pågår…");
+            continue;
+        }
+        updateProcessingStatus("Hämtar resultatfilen…");
+        try {
+            await downloadResult(file_id, result.download_filename);
+            document.getElementById("status").textContent =
+                "Transkribering och analys avslutad. DOCX-fil laddas ner automatiskt.";
+        } catch (err) {
+            document.getElementById("status").textContent =
+                "Resultatet är klart, men den automatiska nedladdningen misslyckades"
+                + describeDownloadFailure(err)
+                + " Den krypterade resultatfilen behålls till den tidsstyrda städningen. Ladda inte om sidan – då kan krypteringsnyckeln i minnet gå förlorad.";
+        }
+        return;
+    }
 }
